@@ -1,0 +1,30 @@
+{
+  "name": "havetodo",
+  "description": "Chrome extension for todo lists on new page",
+  "main": "script.js",
+  "authors": [
+    "Dhiraj Bodicherla <dhiraj.bodicherla@gmail.com>"
+  ],
+  "license": "ISC",
+  "keywords": [
+    "chrome",
+    "extension",
+    "todo",
+    "newpage"
+  ],
+  "moduleType": [
+    "node"
+  ],
+  "homepage": "",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "devDependencies": {
+    "jquery": "~2.1.4"
+  }
+}

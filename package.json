@@ -1,0 +1,47 @@
+{
+  "name": "havetodo",
+  "version": "0.0.1",
+  "description": "Chrome extension for todo lists on new page",
+  "main": "script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/dhirajbodicherla/HaveToDo.git"
+  },
+  "keywords": [
+    "chrome",
+    "extension",
+    "todo",
+    "newpage"
+  ],
+  "author": "Dhiraj Bodicherla <dhiraj.bodicherla@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dhirajbodicherla/HaveToDo/issues"
+  },
+  "homepage": "https://github.com/dhirajbodicherla/HaveToDo#readme",
+  "devDependencies": {
+    "babel-preset-es2015": "^6.3.13",
+    "babel-preset-react": "^6.3.13",
+    "babelify": "^7.2.0",
+    "browserify": "^12.0.1",
+    "grunt": "^0.4.5",
+    "grunt-browserify": "^4.0.1",
+    "grunt-bumpup": "^0.6.2",
+    "grunt-contrib-clean": "^0.7.0",
+    "grunt-contrib-concat": "^0.5.1",
+    "grunt-contrib-copy": "^0.8.2",
+    "grunt-contrib-uglify": "^0.11.0",
+    "grunt-contrib-watch": "^0.6.1",
+    "grunt-react": "^0.12.3",
+    "material-ui": "^0.14.0",
+    "moment": "^2.10.6",
+    "react": "^0.14.3",
+    "react-addons-css-transition-group": "^0.14.3",
+    "react-dom": "^0.14.3",
+    "react-tap-event-plugin": "^0.2.1",
+    "reactify": "^1.1.1"
+  }
+}
