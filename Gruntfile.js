@@ -5,8 +5,8 @@ module.exports = function(grunt) {
 
     watch: {
       browserify: {
-        files: ['scripts/*.jsx', 'scripts/util.js', 'scripts/Constants.js'],
-        tasks: ['browserify:dev', 'concat', 'uglify'],
+        files: ['scripts/*.jsx', 'scripts/util.js', 'scripts/Constants.js', 'tpl/*.html'],
+        tasks: ['browserify:dev', 'concat:dev', 'copy:dev', 'bell'],
         options: {
           livereload: true
         }
@@ -26,7 +26,7 @@ module.exports = function(grunt) {
           transform: [["babelify", {presets: ["es2015", "react"]}]]
         }
       },
-      publish: {
+      prod: {
         files: {
           '.tmp/app.build.js': [
             'scripts/*.jsx', 
@@ -48,31 +48,47 @@ module.exports = function(grunt) {
         src: ['bower_components/jquery/dist/jquery.js',
              'bower_components/Materialize/dist/js/materialize.js',
              '.tmp/app.build.js'],
+        dest: 'app.js',
+      },
+      prod: {
+        src: ['bower_components/jquery/dist/jquery.js',
+             'bower_components/Materialize/dist/js/materialize.js',
+             '.tmp/app.build.js'],
         dest: '.tmp/app.js',
       }
     },
 
     copy: {
-      devext: {
-        files: [{
-          src: 'app.min.js',
-          dest: 'extension/app.min.js'
-        },{
-          src: 'index.html',
-          dest: 'extension/index.html'
-        },{
-          src: 'styles.css',
-          dest: 'extension/styles.css'
-        }]
+      dev: {
+        files: [{ src: 'tpl/dev.index.html', dest: 'index.html' },
+                { src: 'tpl/options.html', dest: 'options.html' },
+                { src: 'tpl/options.html', dest: 'extension/options.html' },
+                { src: 'stylesheets/styles.css', dest: 'extension/styles.css' },
+                { src: 'stylesheets/options.css', dest: 'extension/options.css'},
+                { src: 'bower_components/Materialize/dist/css/materialize.min.css', dest: 'extension/materialize.min.css'},
+                { src: 'bower_components/Materialize/dist/js/materialize.min.js', dest: 'extension/materialize.min.js'},
+                { src: 'bower_components/jquery/dist/jquery.min.js', dest: 'extension/jquery.min.js'},
+                { src: 'options.js', dest: 'extension/options.js'}]
+      },
+      prod: {
+        files: [{ src: 'app.min.js', dest: 'extension/app.min.js' },
+                { src: 'tpl/prod.index.html', dest: 'extension/index.html' },
+                { src: 'stylesheets/styles.css', dest: 'extension/styles.css' },
+                { src: 'stylesheets/options.css', dest: 'extension/options.css' },
+                { src: 'tpl/options.html', dest: 'extension/options.html' },
+                { src: 'bower_components/Materialize/dist/css/materialize.min.css', dest: 'extension/materialize.min.css'},
+                { src: 'bower_components/Materialize/dist/js/materialize.min.js', dest: 'extension/materialize.min.js'},
+                { src: 'bower_components/jquery/dist/jquery.min.js', dest: 'extension/jquery.min.js'},
+                { src: 'options.js', dest: 'extension/options.js'}]
       }
     },
 
     clean: {
-      dev: [".tmp"]
+      dev: [".tmp", "*.zip"]
     },
 
     uglify: {
-      build: {
+      prod: {
         src: '.tmp/app.js',
         dest: 'app.min.js'
       }
@@ -87,7 +103,11 @@ module.exports = function(grunt) {
           {src: ['extension/**'], dest: '/'}
         ]
       }
-    }
+    },
+
+    bumpup: {
+      files: ['package.json', 'bower.json', 'extension/manifest.json']
+    },
 
   });
 
@@ -99,9 +119,20 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-contrib-copy');
   grunt.loadNpmTasks('grunt-contrib-compress');
+  grunt.loadNpmTasks('grunt-bumpup');
+  grunt.loadNpmTasks('grunt-bell');
 
-  grunt.registerTask('default', ['browserify:dev', 'concat', 'uglify', 'clean:dev']);
-  grunt.registerTask('ext', ['browserify:dev', 'concat', 'uglify', 'copy:devext', 'clean:dev']);
-  grunt.registerTask('publishext', ['browserify:publish', 'concat', 'uglify', 'copy:devext', 'clean:dev', 'compress']);
+  grunt.registerTask('default', ['browserify:dev', 'concat:dev', 'copy:dev']);
+  grunt.registerTask('ext', ['browserify:prod', 'concat:prod', 'uglify:prod', 'copy:prod', 'clean:dev']);
+  grunt.registerTask('release', function (type) {
+      grunt.task.run('browserify:prod');
+      grunt.task.run('concat:prod');
+      grunt.task.run('uglify:prod');
+      grunt.task.run('copy:prod');
+      grunt.task.run('clean:dev');
+      if(type)
+        grunt.task.run('bumpup:' + type);
 
+      grunt.task.run('compress');
+  });
 };

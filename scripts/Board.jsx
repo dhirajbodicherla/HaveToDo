@@ -128,7 +128,7 @@ export default class Board extends React.Component{
 		var boards = this.props.items.boards.map(function(board){
 			return <option key={board.id} value={board.id}>{board.name}</option>
 		});
-		return (<div>
+		return (<div id="board-container">
 				<input type="button" value="state" onClick={this.showState.bind(this)} style={{"display": "none"}}/>
 				<select onChange={this.changeBoard.bind(this)} style={{"display": "none"}}>{boards}</select>
 				<ReactCSSTransitionGroup transitionEnterTimeout={500} transitionLeaveTimeout={300} component="ul" transitionName="tasks-list-transition" className="lists-container">{boardLists}</ReactCSSTransitionGroup>

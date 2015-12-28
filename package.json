@@ -1,6 +1,6 @@
 {
   "name": "havetodo",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Chrome extension for todo lists on new page",
   "main": "script.js",
   "scripts": {
@@ -28,6 +28,7 @@
     "babelify": "^7.2.0",
     "browserify": "^12.0.1",
     "grunt": "^0.4.5",
+    "grunt-bell": "^0.1.2",
     "grunt-browserify": "^4.0.1",
     "grunt-bumpup": "^0.6.2",
     "grunt-contrib-clean": "^0.7.0",

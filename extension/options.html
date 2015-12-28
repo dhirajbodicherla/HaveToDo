@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>HaveToDo - Options</title>
+	<meta charset="utf-8">
+	<link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
+	<link rel="stylesheet" type="text/css" href="options.css">
+	<link rel="stylesheet" type="text/css" href="materialize.min.css">
+</head>
+<body>
+  <div class="container">
+    <h2 class="title">HaveToDo - Options</h2>
+    <div class="row">
+        <form class="col s12">
+          <div class="row">
+            <div class="col s2">
+              <label>Day-end Notification</label>
+            </div>
+            <div class="col s4">
+              <div class="switch">
+                <label>
+                  Disable
+                  <input type="checkbox" id="dayendnotification-switch">
+                  <span class="lever"></span>
+                  Enable
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="row notification-times">
+            <div class="col s2">
+              <label for="time">Notification time</label>
+            </div>
+            <div class="col s4">
+              <input type="time" name="usr_time" id="time" class="s4"/>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s2">
+              <label>Repeat</label>
+            </div>
+            <div class="col s10">
+              <p>
+                <input type="checkbox" class="filled-in" id="sunday" checked="checked" />
+                <label for="sunday">Sunday</label>
+
+                <input type="checkbox" class="filled-in" id="monday"/>
+                <label for="monday">Monday</label>
+
+                <input type="checkbox" class="filled-in" id="tuesday"/>
+                <label for="tuesday">Tuesday</label>
+
+                <input type="checkbox" class="filled-in" id="wednesday"/>
+                <label for="wednesday">Wednesday</label>
+
+                <input type="checkbox" class="filled-in" id="thursday"/>
+                <label for="thursday">Thursday</label>
+
+                <input type="checkbox" class="filled-in" id="friday"/>
+                <label for="friday">Friday</label>
+
+                <input type="checkbox" class="filled-in" id="saturday"/>
+                <label for="saturday">Saturday</label>
+              </p>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12">
+              <a class="waves-effect waves-light btn-large">Update</a>
+            </div>
+          </div>
+        </form>
+  	</div>
+  	<script type="text/javascript" src="jquery.min.js"></script>
+  	<script type="text/javascript" src="materialize.min.js"></script>
+  	<script type="text/javascript" src="options.js"></script>
+</body>
+</html>
