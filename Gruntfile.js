@@ -25,6 +25,18 @@ module.exports = function(grunt) {
           debug: true,
           transform: [["babelify", {presets: ["es2015", "react"]}]]
         }
+      },
+      publish: {
+        files: {
+          '.tmp/app.build.js': [
+            'scripts/*.jsx', 
+            'scripts/util.js', 
+            'scripts/Constants.js']
+        },
+        options: {
+          debug: false,
+          transform: [["babelify", {presets: ["es2015", "react"]}]]
+        }
       }
     },
 
@@ -66,6 +78,17 @@ module.exports = function(grunt) {
       }
     },
 
+    compress: {
+      main: {
+        options: {
+          archive: 'havetodo.zip'
+        },
+        files: [
+          {src: ['extension/**'], dest: '/'}
+        ]
+      }
+    }
+
   });
 
 
@@ -75,8 +98,10 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-uglify');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-contrib-copy');
+  grunt.loadNpmTasks('grunt-contrib-compress');
 
   grunt.registerTask('default', ['browserify:dev', 'concat', 'uglify', 'clean:dev']);
   grunt.registerTask('ext', ['browserify:dev', 'concat', 'uglify', 'copy:devext', 'clean:dev']);
+  grunt.registerTask('publishext', ['browserify:publish', 'concat', 'uglify', 'copy:devext', 'clean:dev', 'compress']);
 
 };

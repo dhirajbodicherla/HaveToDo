@@ -7,6 +7,9 @@ export default class ListActions extends React.Component{
 		super(props);
 		this.state = { value: 0};
 	}
+	onClick(){
+		this.props.sort();
+	}
 	render(){
 		var style = {
 			"visibility": "visible"
@@ -14,7 +17,7 @@ export default class ListActions extends React.Component{
 		if(!this.props.hasSort){
 			style["visibility"] = "hidden";
 		}
-		return <div style={style}>
+		return <div style={style} onClick={this.onClick.bind(this)}>
 			<IconButton>
 			  <FontIcon className="muidocs-icon-custom-sort"/>
 			</IconButton>
