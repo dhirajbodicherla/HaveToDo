@@ -41,9 +41,13 @@ Util.shadeColor = function(p,c0,c1) {
 
 Util.timeago = function(time, timeDifference){
 	if(!time) return;
-	if(timeDifference == 1) return "Today";
-	else if(timeDifference == 2) return "Yesterday";
+	if(timeDifference === 0) return "Today";
+	else if(timeDifference === 1) return "Yesterday";
 	else return moment(time).format("ddd, MMM Do")
 };
+
+Util.UUID = function(){
+	return Math.random().toString(36).substring(7);
+}
 
 export default Util;

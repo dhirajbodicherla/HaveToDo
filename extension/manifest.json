@@ -1,6 +1,6 @@
 {
   "name": "HaveToDo",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "manifest_version": 2,
   "short_name": "HaveToDo",
   "chrome_url_overrides": {

@@ -5,7 +5,7 @@ module.exports = function(grunt) {
 
     watch: {
       browserify: {
-        files: ['scripts/*.jsx', 'scripts/util.js', 'scripts/Constants.js', 'tpl/*.html'],
+        files: ['scripts/*.jsx', 'scripts/*.js', 'tpl/*.html'],
         tasks: ['browserify:dev', 'concat:dev', 'copy:dev', 'bell'],
         options: {
           livereload: true

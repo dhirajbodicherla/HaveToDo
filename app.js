@@ -69994,6 +69994,92 @@ module.exports = warning;
 
 }).call(this,require('_process'))
 },{"_process":225}],375:[function(require,module,exports){
+"use strict";
+
+var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
+
+var _react = require('react');
+
+var _react2 = _interopRequireDefault(_react);
+
+var _reactDom = require('react-dom');
+
+var _reactDom2 = _interopRequireDefault(_reactDom);
+
+var _Board = require('./Board.jsx');
+
+var _Board2 = _interopRequireDefault(_Board);
+
+var _util = require('./util.js');
+
+var _util2 = _interopRequireDefault(_util);
+
+var _Constants = require('./Constants.js');
+
+var _Constants2 = _interopRequireDefault(_Constants);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
+
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
+
+var localData,
+    isExt = 0;
+var mountNode = document.getElementById('body');
+var storage = chrome.storage ? chrome.storage.local : localStorage;
+
+var injectTapEventPlugin = require("react-tap-event-plugin");
+injectTapEventPlugin();
+
+var App = (function (_React$Component) {
+	_inherits(App, _React$Component);
+
+	function App() {
+		_classCallCheck(this, App);
+
+		return _possibleConstructorReturn(this, Object.getPrototypeOf(App).apply(this, arguments));
+	}
+
+	_createClass(App, [{
+		key: 'render',
+		value: function render() {
+			return _react2.default.createElement(
+				'div',
+				{ id: 'main-container' },
+				_react2.default.createElement(_Board2.default, { items: this.props.items }),
+				_react2.default.createElement(
+					'div',
+					{ id: 'footer' },
+					_react2.default.createElement(
+						'p',
+						{ id: 'feedback' },
+						_react2.default.createElement(
+							'a',
+							{ href: 'https://github.com/dhirajbodicherla/HaveToDo/issues/new', target: '_blank' },
+							'Feedback'
+						)
+					)
+				)
+			);
+		}
+	}]);
+
+	return App;
+})(_react2.default.Component);
+
+_util2.default.storage.get('havetodo', function (data) {
+	if (data['havetodo'] !== undefined) {
+		localData = data['havetodo'] != "" ? JSON.parse(data['havetodo']) : {};
+	} else {
+		localData = _Constants2.default.defaultItemStructure;
+	}
+	_reactDom2.default.render(_react2.default.createElement(App, { items: localData }), mountNode);
+});
+
+},{"./Board.jsx":376,"./Constants.js":377,"./util.js":383,"react":373,"react-dom":231,"react-tap-event-plugin":235}],376:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -70030,9 +70116,33 @@ var _util = require('./util.js');
 
 var _util2 = _interopRequireDefault(_util);
 
+var _Constants = require('./Constants.js');
+
+var _Constants2 = _interopRequireDefault(_Constants);
+
 var _ListActions = require('./ListActions.jsx');
 
 var _ListActions2 = _interopRequireDefault(_ListActions);
+
+var _DropDownMenu = require('material-ui/lib/DropDownMenu');
+
+var _DropDownMenu2 = _interopRequireDefault(_DropDownMenu);
+
+var _menuItem = require('material-ui/lib/menus/menu-item');
+
+var _menuItem2 = _interopRequireDefault(_menuItem);
+
+var _textField = require('material-ui/lib/text-field');
+
+var _textField2 = _interopRequireDefault(_textField);
+
+var _dialog = require('material-ui/lib/dialog');
+
+var _dialog2 = _interopRequireDefault(_dialog);
+
+var _flatButton = require('material-ui/lib/flat-button');
+
+var _flatButton2 = _interopRequireDefault(_flatButton);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -70050,25 +70160,32 @@ var Board = (function (_React$Component) {
 
 		var _this = _possibleConstructorReturn(this, Object.getPrototypeOf(Board).call(this, props));
 
-		var endOfToday = (0, _moment2.default)().endOf('day');
-		var currentBoard = props.items.boards[0];
-		var todoList = currentBoard.lists.filter(function (list) {
-			return list.name === 'Todo';
-		})[0];
-		var todayList = currentBoard.lists.filter(function (list) {
-			return list.name === 'Today';
-		})[0];
-		for (var i = 0; i < todoList.cards.length; i++) {
-			var deadline = todoList.cards[i].deadline;
-			if (deadline && (0, _moment2.default)(deadline).isBefore(endOfToday)) {
-				var card = todoList.cards.splice(i, 1)[0];
-				todayList.cards = [card].concat(todayList.cards);
-				i--;
+		if (_this.props.items.boards.length) {
+			var endOfToday = (0, _moment2.default)().endOf('day');
+			var currentBoard = props.items.boards[0];
+			var todoList = currentBoard.lists.filter(function (list) {
+				return list.name === 'Todo';
+			})[0];
+			var todayList = currentBoard.lists.filter(function (list) {
+				return list.name === 'Today';
+			})[0];
+			for (var i = 0; i < todoList.cards.length; i++) {
+				var deadline = todoList.cards[i].deadline;
+				if (deadline && (0, _moment2.default)(deadline).isBefore(endOfToday)) {
+					var card = todoList.cards.splice(i, 1)[0];
+					todayList.cards = [card].concat(todayList.cards);
+					i--;
+				}
 			}
+			_this.state = {
+				board: currentBoard,
+				isBoardModalOpen: false
+			};
+		} else {
+			_this.state = {
+				isBoardModalOpen: true
+			};
 		}
-		_this.state = {
-			board: currentBoard
-		};
 		return _this;
 	}
 
@@ -70083,15 +70200,45 @@ var Board = (function (_React$Component) {
 			this.saveToStorage();
 		}
 	}, {
+		key: 'createBoard',
+		value: function createBoard() {
+			var name = this.refs.boardInput.getValue();
+			if (name.trim() != '') {
+				var board = {};
+				board['id'] = _util2.default.UUID();
+				board['name'] = name;
+				board['lists'] = _Constants2.default.defaultListStructure;
+				this.props.items.boards.push(board);
+				this.setState({
+					'board': board,
+					'isBoardModalOpen': false
+				}, this.saveToStorage);
+				this.refs.boardInput.clearValue();
+			}
+		}
+	}, {
+		key: 'boardModalButtonClick',
+		value: function boardModalButtonClick() {
+			var state = this.state;
+			state['isBoardModalOpen'] = false;
+			this.setState(state);
+		}
+	}, {
 		key: 'changeBoard',
-		value: function changeBoard(e) {
-			var newValue = e.target.value;
-			var board = this.props.items.boards.filter(function (v) {
-				return v.id == newValue;
-			})[0];
-			this.setState({
-				'board': board
-			}, this.saveToStorage);
+		value: function changeBoard(e, index, value) {
+			if (value == -1) {
+				var state = this.state;
+				state['isBoardModalOpen'] = true;
+				this.setState(state);
+			} else {
+				var newValue = value;
+				var board = this.props.items.boards.filter(function (v) {
+					return v.id == newValue;
+				})[0];
+				this.setState({
+					'board': board
+				}, this.saveToStorage);
+			}
 		}
 	}, {
 		key: 'moveCard',
@@ -70175,49 +70322,98 @@ var Board = (function (_React$Component) {
 	}, {
 		key: 'render',
 		value: function render() {
-			var board = this.state.board;
-			var boardLists = board.lists.map((function (list, i) {
-				var hasInput = i == 0 ? 1 : 0;
-				var hasSort = i == 1 ? 1 : 0;
+			var boards = [];
+			if (this.props.items.boards.length) {
+				var actions = [_react2.default.createElement(_flatButton2.default, {
+					label: 'Cancel',
+					primary: true,
+					onTouchTap: this.boardModalButtonClick.bind(this) }), _react2.default.createElement(_flatButton2.default, {
+					label: 'Submit',
+					secondary: true,
+					onTouchTap: this.createBoard.bind(this) })];
+				var board = this.state.board;
+				var boardLists = board.lists.map((function (list, i) {
+					var hasInput = i == 0 ? 1 : 0;
+					var hasSort = i == -1 ? 1 : 0;
+					return _react2.default.createElement(
+						'li',
+						{ className: "list-container " + list.name, key: list.id },
+						_react2.default.createElement(
+							'p',
+							{ className: 'list-name' },
+							list.name
+						),
+						_react2.default.createElement(_ListActions2.default, { hasSort: hasSort, sort: this.sortList.bind(this, list.id) }),
+						_react2.default.createElement(_List2.default, { list: list,
+							dragOver: this.dragOver.bind(this),
+							dragEnd: this.dragEnd.bind(this),
+							dragStart: this.dragStart.bind(this),
+							hasInput: hasInput,
+							update: this.onUpdate.bind(this) })
+					);
+				}).bind(this));
+				boards = this.props.items.boards.map(function (board) {
+					return _react2.default.createElement(_menuItem2.default, { value: board.id, primaryText: board.name, key: board.id });
+				});
+				boards.push(_react2.default.createElement(_menuItem2.default, { value: '-1', primaryText: 'Create new board', key: '-1' }));
+
 				return _react2.default.createElement(
-					'li',
-					{ className: "list-container " + list.name, key: list.id },
+					'div',
+					null,
 					_react2.default.createElement(
-						'p',
-						{ className: 'list-name' },
-						list.name
+						'div',
+						{ id: 'actions-container' },
+						_react2.default.createElement('input', { type: 'button', value: 'state', onClick: this.showState.bind(this), style: { "display": "none" } }),
+						_react2.default.createElement(
+							_DropDownMenu2.default,
+							{ ref: 'changeBoardDropDown',
+								style: { "minWidth": "200px" },
+								value: board.id,
+								onChange: this.changeBoard.bind(this) },
+							boards
+						)
 					),
-					_react2.default.createElement(_ListActions2.default, { hasSort: hasSort, sort: this.sortList.bind(this, list.id) }),
-					_react2.default.createElement(_List2.default, { list: list,
-						dragOver: this.dragOver.bind(this),
-						dragEnd: this.dragEnd.bind(this),
-						dragStart: this.dragStart.bind(this),
-						hasInput: hasInput,
-						update: this.onUpdate.bind(this) })
+					_react2.default.createElement(
+						'div',
+						{ id: 'board-container' },
+						_react2.default.createElement(
+							_reactAddonsCssTransitionGroup2.default,
+							{ key: board.id, transitionEnterTimeout: 500, transitionLeaveTimeout: 300, component: 'ul', transitionName: 'tasks-list-transition', className: 'lists-container' },
+							boardLists
+						)
+					),
+					_react2.default.createElement(
+						_dialog2.default,
+						{
+							title: 'Create new board',
+							actions: actions,
+							modal: true,
+							open: this.state.isBoardModalOpen },
+						_react2.default.createElement(_textField2.default, { fullWidth: true, hintText: 'Enter new board here', ref: 'boardInput', onEnterKeyDown: this.createBoard.bind(this) })
+					)
 				);
-			}).bind(this));
-			var boards = this.props.items.boards.map(function (board) {
+			} else {
+				var actions = [_react2.default.createElement(_flatButton2.default, {
+					label: 'Cancel',
+					disabled: true,
+					primary: true,
+					onTouchTap: this.boardModalButtonClick.bind(this) }), _react2.default.createElement(_flatButton2.default, {
+					label: 'Submit',
+					secondary: true,
+					onTouchTap: this.createBoard.bind(this) })];
 				return _react2.default.createElement(
-					'option',
-					{ key: board.id, value: board.id },
-					board.name
+					_dialog2.default,
+					{
+						title: 'Create new board',
+						actions: actions,
+						modal: true,
+						open: this.state.isBoardModalOpen },
+					_react2.default.createElement(_textField2.default, { fullWidth: true,
+						hintText: 'Enter new board here',
+						ref: 'boardInput',
+						onEnterKeyDown: this.createBoard.bind(this) })
 				);
-			});
-			return _react2.default.createElement(
-				'div',
-				{ id: 'board-container' },
-				_react2.default.createElement('input', { type: 'button', value: 'state', onClick: this.showState.bind(this), style: { "display": "none" } }),
-				_react2.default.createElement(
-					'select',
-					{ onChange: this.changeBoard.bind(this), style: { "display": "none" } },
-					boards
-				),
-				_react2.default.createElement(
-					_reactAddonsCssTransitionGroup2.default,
-					{ transitionEnterTimeout: 500, transitionLeaveTimeout: 300, component: 'ul', transitionName: 'tasks-list-transition', className: 'lists-container' },
-					boardLists
-				)
-			);
+			}
 		}
 	}]);
 
@@ -70226,24 +70422,47 @@ var Board = (function (_React$Component) {
 
 exports.default = Board;
 
-},{"./InputComponent.jsx":377,"./List.jsx":378,"./ListActions.jsx":379,"./util.js":382,"moment":224,"react":373,"react-addons-css-transition-group":227,"react-dom":231}],376:[function(require,module,exports){
+},{"./Constants.js":377,"./InputComponent.jsx":378,"./List.jsx":379,"./ListActions.jsx":380,"./util.js":383,"material-ui/lib/DropDownMenu":61,"material-ui/lib/dialog":93,"material-ui/lib/flat-button":100,"material-ui/lib/menus/menu-item":120,"material-ui/lib/text-field":184,"moment":224,"react":373,"react-addons-css-transition-group":227,"react-dom":231}],377:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
 	value: true
 });
+
+var _Util = require("./Util.js");
+
+var _Util2 = _interopRequireDefault(_Util);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
 var Constants = {
 	"colors": ["#FFFFFF", // white
 	"#E6E73B", // yellow
 	"#F29507", // orange
 	"#D01B1B", // light red
 	"#920000" // red
-	]
+	],
+	"defaultItemStructure": {
+		'boards': []
+	},
+	"defaultListStructure": [{
+		'name': 'Todo',
+		'id': _Util2.default.UUID(),
+		'cards': []
+	}, {
+		'name': 'Today',
+		'id': _Util2.default.UUID(),
+		'cards': []
+	}, {
+		'name': 'Done',
+		'id': _Util2.default.UUID(),
+		'cards': []
+	}]
 };
 
 exports.default = Constants;
 
-},{}],377:[function(require,module,exports){
+},{"./Util.js":382}],378:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -70316,9 +70535,10 @@ var InputComponent = (function (_React$Component) {
 	_createClass(InputComponent, [{
 		key: 'createCard',
 		value: function createCard(e) {
-			if (e.keyCode == 13 && $(e.target).val().trim() != '') {
-				this.props.addCard($(e.target).val(), {
-					name: $(e.target).val(),
+			var name = $(e.target).val();
+			if (e.keyCode == 13 && name.trim() != '') {
+				this.props.addCard(name, {
+					name: name,
 					deadline: this.refs.datepicker.getDate()
 				});
 				this.refs.taskInput.clearValue();
@@ -70375,7 +70595,7 @@ var InputComponent = (function (_React$Component) {
 
 exports.default = InputComponent;
 
-},{"./util.js":382,"material-ui/lib/card/card":79,"material-ui/lib/card/card-header":75,"material-ui/lib/card/card-text":77,"material-ui/lib/date-picker/date-picker":90,"material-ui/lib/date-picker/date-picker-dialog":88,"material-ui/lib/text-field":184,"moment":224,"react":373}],378:[function(require,module,exports){
+},{"./util.js":383,"material-ui/lib/card/card":79,"material-ui/lib/card/card-header":75,"material-ui/lib/card/card-text":77,"material-ui/lib/date-picker/date-picker":90,"material-ui/lib/date-picker/date-picker-dialog":88,"material-ui/lib/text-field":184,"moment":224,"react":373}],379:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -70399,6 +70619,10 @@ var _TaskCard2 = _interopRequireDefault(_TaskCard);
 var _InputComponent = require('./InputComponent.jsx');
 
 var _InputComponent2 = _interopRequireDefault(_InputComponent);
+
+var _util = require('./util.js');
+
+var _util2 = _interopRequireDefault(_util);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -70431,7 +70655,7 @@ var List = (function (_React$Component) {
 					name: cardLabel
 				};
 			}
-			card['id'] = Math.random().toString(36).substring(7);
+			card['id'] = _util2.default.UUID();
 			list.cards = [card].concat(list.cards);
 
 			this.setState({
@@ -70502,7 +70726,7 @@ var List = (function (_React$Component) {
 
 exports.default = List;
 
-},{"./InputComponent.jsx":377,"./TaskCard.jsx":380,"moment":224,"react":373}],379:[function(require,module,exports){
+},{"./InputComponent.jsx":378,"./TaskCard.jsx":381,"./util.js":383,"moment":224,"react":373}],380:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -70550,7 +70774,7 @@ var ListActions = (function (_React$Component) {
 		key: 'render',
 		value: function render() {
 			var style = {
-				"visibility": "visible"
+				"display": "none"
 			};
 			if (!this.props.hasSort) {
 				style["visibility"] = "hidden";
@@ -70572,7 +70796,7 @@ var ListActions = (function (_React$Component) {
 
 exports.default = ListActions;
 
-},{"material-ui/lib/":107,"react":373,"react-dom":231}],380:[function(require,module,exports){
+},{"material-ui/lib/":107,"react":373,"react-dom":231}],381:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -70624,6 +70848,14 @@ var _cardText2 = _interopRequireDefault(_cardText);
 var _textField = require('material-ui/lib/text-field');
 
 var _textField2 = _interopRequireDefault(_textField);
+
+var _flatButton = require('material-ui/lib/flat-button');
+
+var _flatButton2 = _interopRequireDefault(_flatButton);
+
+var _fontIcon = require('material-ui/lib/font-icon');
+
+var _fontIcon2 = _interopRequireDefault(_fontIcon);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -70689,13 +70921,15 @@ var TaskCard = (function (_React$Component) {
 	}, {
 		key: 'showDatepicker',
 		value: function showDatepicker() {
+			if (this.props.card.deadline) this.refs.datepicker.setDate(new Date(this.props.card.deadline));
 			this.refs.datepicker.openDialog();
 		}
 	}, {
 		key: 'render',
 		value: function render() {
-			var today = new Date().toUTCString(),
-			    diff = (0, _moment2.default)(today).diff(this.props.card.deadline, 'days'),
+			var today = (0, _moment2.default)().startOf('day'),
+			    deadline = (0, _moment2.default)(this.props.card.deadline),
+			    diff = today.diff(deadline, 'days'),
 			    style = {
 				borderLeft: "#FFFFFF"
 			};
@@ -70705,6 +70939,7 @@ var TaskCard = (function (_React$Component) {
 				style['borderLeft'] = "10px solid " + shadedColor;
 			}
 			var card = this.state.card;
+
 			return _react2.default.createElement(
 				'li',
 				{ className: 'card-container', draggable: 'true', 'data-card-id': card.id, ref: 'listEl' },
@@ -70716,7 +70951,7 @@ var TaskCard = (function (_React$Component) {
 						multiLine: false,
 						ref: 'taskInput',
 						defaultValue: card.name,
-						style: { "display": "none" },
+						style: { "display": "none", "marginLeft": "16px", "marginBottom": "24px" },
 						onEnterKeyDown: this.saveCard.bind(this),
 						onBlur: this.saveCard.bind(this),
 						underlineStyle: { "color": "rgba(27, 100, 121, 0.75)" } }),
@@ -70724,11 +70959,14 @@ var TaskCard = (function (_React$Component) {
 						_cardText2.default,
 						{ className: 'deadline-container', onClick: this.showDatepicker.bind(this) },
 						_react2.default.createElement(
-							'span',
-							{ className: 'time' },
-							'◴'
-						),
-						_util2.default.timeago(card.deadline, diff)
+							_flatButton2.default,
+							{ secondary: true, style: { "color": "black", "fontSize": "10px" }, label: _util2.default.timeago(card.deadline, diff), labelPosition: 'after' },
+							_react2.default.createElement(
+								_fontIcon2.default,
+								{ style: { "verticalAlign": "middle", "fontSize": "14px", "right": "-10px" }, className: 'material-icons' },
+								'schedule'
+							)
+						)
 					)
 				),
 				_react2.default.createElement(_datePicker2.default, {
@@ -70745,111 +70983,7 @@ var TaskCard = (function (_React$Component) {
 
 exports.default = TaskCard;
 
-},{"./Constants.js":376,"./util.js":382,"material-ui/lib/card/card":79,"material-ui/lib/card/card-header":75,"material-ui/lib/card/card-text":77,"material-ui/lib/date-picker/date-picker":90,"material-ui/lib/date-picker/date-picker-dialog":88,"material-ui/lib/text-field":184,"moment":224,"react":373,"react-dom":231}],381:[function(require,module,exports){
-"use strict";
-
-var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
-
-var _react = require('react');
-
-var _react2 = _interopRequireDefault(_react);
-
-var _reactDom = require('react-dom');
-
-var _reactDom2 = _interopRequireDefault(_reactDom);
-
-var _Board = require('./Board.jsx');
-
-var _Board2 = _interopRequireDefault(_Board);
-
-var _util = require('./util.js');
-
-var _util2 = _interopRequireDefault(_util);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
-
-var localData,
-    isExt = 0;
-var mountNode = document.getElementById('body');
-var storage = chrome.storage ? chrome.storage.local : localStorage;
-
-var injectTapEventPlugin = require("react-tap-event-plugin");
-injectTapEventPlugin();
-
-var lists = [{
-  'name': 'Todo',
-  'id': 'list1-b1',
-  'cards': []
-}, {
-  'name': 'Today',
-  'id': 'list3-b1',
-  'cards': []
-}, {
-  'name': 'Done',
-  'id': 'list2-b1',
-  'cards': []
-}];
-
-var items = {
-  'boards': [{
-    'name': 'Work',
-    'id': 'board11',
-    'lists': lists
-  }]
-};
-
-var App = (function (_React$Component) {
-  _inherits(App, _React$Component);
-
-  function App() {
-    _classCallCheck(this, App);
-
-    return _possibleConstructorReturn(this, Object.getPrototypeOf(App).apply(this, arguments));
-  }
-
-  _createClass(App, [{
-    key: 'render',
-    value: function render() {
-      return _react2.default.createElement(
-        'div',
-        { id: 'main-container' },
-        _react2.default.createElement(_Board2.default, { items: this.props.items }),
-        _react2.default.createElement(
-          'div',
-          { id: 'footer' },
-          _react2.default.createElement(
-            'p',
-            { id: 'feedback' },
-            _react2.default.createElement(
-              'a',
-              { href: 'https://github.com/dhirajbodicherla/HaveToDo/issues/new', target: '_blank' },
-              'Feedback'
-            )
-          )
-        )
-      );
-    }
-  }]);
-
-  return App;
-})(_react2.default.Component);
-
-_util2.default.storage.get('havetodo', function (data) {
-  if (data['havetodo'] !== undefined) {
-    localData = data['havetodo'] != "" ? JSON.parse(data['havetodo']) : {};
-  } else {
-    localData = items;
-  }
-  _reactDom2.default.render(_react2.default.createElement(App, { items: localData }), mountNode);
-});
-
-},{"./Board.jsx":375,"./util.js":382,"react":373,"react-dom":231,"react-tap-event-plugin":235}],382:[function(require,module,exports){
+},{"./Constants.js":377,"./util.js":383,"material-ui/lib/card/card":79,"material-ui/lib/card/card-header":75,"material-ui/lib/card/card-text":77,"material-ui/lib/date-picker/date-picker":90,"material-ui/lib/date-picker/date-picker-dialog":88,"material-ui/lib/flat-button":100,"material-ui/lib/font-icon":102,"material-ui/lib/text-field":184,"moment":224,"react":373,"react-dom":231}],382:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -70908,9 +71042,81 @@ Util.shadeColor = function (p, c0, c1) {
 
 Util.timeago = function (time, timeDifference) {
 	if (!time) return;
-	if (timeDifference == 1) return "Today";else if (timeDifference == 2) return "Yesterday";else return moment(time).format("ddd, MMM Do");
+	if (timeDifference === 0) return "Today";else if (timeDifference === 1) return "Yesterday";else return moment(time).format("ddd, MMM Do");
+};
+
+Util.UUID = function () {
+	return Math.random().toString(36).substring(7);
 };
 
 exports.default = Util;
 
-},{"moment":224}]},{},[375,377,378,379,380,381,382,376]);
+},{"moment":224}],383:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+	value: true
+});
+var moment = require('moment');
+
+var isExt = chrome.storage ? 1 : 0;
+var Util = {
+	"storage": {
+		"set": function set() {},
+		"get": function get() {}
+	}
+};
+Util.storage.set = function (key, keyValue) {
+	if (isExt) {
+		var obj = {};
+		obj[key] = keyValue;
+		chrome.storage.local.set(obj);
+	} else {
+		localStorage.setItem(key, keyValue);
+	}
+};
+Util.storage.get = function (key, cb) {
+	if (isExt) {
+		chrome.storage.local.get(key, cb);
+	} else {
+		var result = {};
+		if (localStorage.getItem(key) !== null) {
+			result[key] = localStorage.getItem(key);
+		}
+		cb.call(null, result);
+	}
+};
+
+Util.shadeColor = function (p, c0, c1) {
+	var n = p < 0 ? p * -1 : p,
+	    u = Math.round,
+	    w = parseInt;
+	if (c0.length > 7) {
+		var f = c0.split(","),
+		    t = (c1 ? c1 : p < 0 ? "rgb(0,0,0)" : "rgb(255,255,255)").split(","),
+		    R = w(f[0].slice(4)),
+		    G = w(f[1]),
+		    B = w(f[2]);
+		return "rgb(" + (u((w(t[0].slice(4)) - R) * n) + R) + "," + (u((w(t[1]) - G) * n) + G) + "," + (u((w(t[2]) - B) * n) + B) + ")";
+	} else {
+		var f = w(c0.slice(1), 16),
+		    t = w((c1 ? c1 : p < 0 ? "#000000" : "#FFFFFF").slice(1), 16),
+		    R1 = f >> 16,
+		    G1 = f >> 8 & 0x00FF,
+		    B1 = f & 0x0000FF;
+		return "#" + (0x1000000 + (u(((t >> 16) - R1) * n) + R1) * 0x10000 + (u(((t >> 8 & 0x00FF) - G1) * n) + G1) * 0x100 + (u(((t & 0x0000FF) - B1) * n) + B1)).toString(16).slice(1);
+	}
+};
+
+Util.timeago = function (time, timeDifference) {
+	if (!time) return;
+	if (timeDifference === 0) return "Today";else if (timeDifference === 1) return "Yesterday";else return moment(time).format("ddd, MMM Do");
+};
+
+Util.UUID = function () {
+	return Math.random().toString(36).substring(7);
+};
+
+exports.default = Util;
+
+},{"moment":224}]},{},[375,376,378,379,380,381,383,377]);

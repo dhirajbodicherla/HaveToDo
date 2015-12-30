@@ -19,9 +19,10 @@ export default class InputComponent extends React.Component{
 		};
 	}
 	createCard(e){
-		if(e.keyCode == 13 && $(e.target).val().trim() != ''){
-			this.props.addCard($(e.target).val(), {
-				name: $(e.target).val(),
+		var name = $(e.target).val();
+		if(e.keyCode == 13 && name.trim() != ''){
+			this.props.addCard(name, {
+				name: name,
 				deadline: this.refs.datepicker.getDate()
 			});
 			this.refs.taskInput.clearValue();

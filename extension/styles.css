@@ -1,6 +1,6 @@
 * { box-sizing: Border-box }
 body{
-  background: #ECF0F0;
+  background: rgba(236, 240, 240, 0.52);
   font-family: 'Roboto', sans-serif;
 }
 ul,li,p{
@@ -13,10 +13,14 @@ ul{
 #main-container{
 
 }
-#board-container{
-  min-width: 950px;
+#actions-container{
   margin: 0 auto;
-  width: 950px;
+  width: 1000px;
+}
+#board-container{
+  min-width: 1000px;
+  margin: 0 auto;
+  width: 1000px;
   position: relative;
   top: 25px;
   display: -webkit-flex;
@@ -50,6 +54,12 @@ ul{
 }
 .cards-container{
   margin: 0 2px;
+  background: rgba(236, 240, 240, 0.38);
+  padding: 5px;
+  border-radius: 2px;
+  margin: 0 5px;
+  border: 1px solid rgba(192, 192, 192, 0.11);
+  min-height: 500px;
 }
 /*.cards-container.Today .card{
   box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.2),
@@ -101,6 +111,7 @@ ul{
 .card-container{
   /*height: 70px;*/
   width: 300px;
+  padding: 3px 1px;
 }
 .card-container:hover .card-deadline{
   display: block;
@@ -112,7 +123,6 @@ ul{
   margin-bottom: 5px;
   padding: 5px !important;
   margin-right: 5px;
-  font-size: 12px !important;
   cursor: pointer;
   font-weight: 600;
 }
@@ -127,8 +137,12 @@ ul{
 .card-container.empty-list .card .card-name{
   font-size: 13px;
 }
-.input-container{
-  /*height: 45px;*/
+.card-container.input-container > div{
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.card-container.input-container .deadline-container{
+  display: none;
 }
 .task-input{
   outline: none;

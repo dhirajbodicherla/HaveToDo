@@ -12,7 +12,7 @@ export default class ListActions extends React.Component{
 	}
 	render(){
 		var style = {
-			"visibility": "visible"
+			"display": "none"
 		};
 		if(!this.props.hasSort){
 			style["visibility"] = "hidden";

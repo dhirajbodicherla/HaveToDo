@@ -9,6 +9,9 @@ import Card from 'material-ui/lib/card/card';
 import CardHeader from 'material-ui/lib/card/card-header';
 import CardText from 'material-ui/lib/card/card-text';
 import TextField from 'material-ui/lib/text-field';
+import FlatButton from 'material-ui/lib/flat-button';
+import FontIcon from 'material-ui/lib/font-icon';
+
 
 export default class TaskCard extends React.Component{
 	constructor(props){
@@ -47,11 +50,14 @@ export default class TaskCard extends React.Component{
 		this.props.update();
 	}
 	showDatepicker() {
+		if(this.props.card.deadline)
+			this.refs.datepicker.setDate(new Date(this.props.card.deadline));
 		this.refs.datepicker.openDialog();
 	}
 	render(){
-		var today = (new Date()).toUTCString(),
-			diff = moment(today).diff(this.props.card.deadline, 'days'),
+		var today = moment().startOf('day'),
+			deadline = moment(this.props.card.deadline),
+			diff = today.diff(deadline, 'days'),
 			style = {
 				borderLeft: "#FFFFFF"
 			};
@@ -61,6 +67,7 @@ export default class TaskCard extends React.Component{
 			style['borderLeft'] = "10px solid " + shadedColor;
 		}
 	  	var card = this.state.card;
+
 	  	return <li className="card-container" draggable="true" data-card-id={card.id} ref="listEl">
 		  	<Card expandable={false} style={style}>
 		  		<CardHeader title={card.name} onClick={this.editMode.bind(this)} ref="cardName" />
@@ -68,12 +75,14 @@ export default class TaskCard extends React.Component{
 		  	    				multiLine={false} 
 		  	    				ref="taskInput" 
 		  	    				defaultValue={card.name} 
-		  	    				style={{"display": "none"}} 
+		  	    				style={{"display": "none", "marginLeft": "16px", "marginBottom": "24px"}} 
 		  	    				onEnterKeyDown={this.saveCard.bind(this)} 
 		  	    				onBlur={this.saveCard.bind(this)}
 		  	    				underlineStyle={{"color": "rgba(27, 100, 121, 0.75)"}}/>
 		  	    <CardText className="deadline-container" onClick={this.showDatepicker.bind(this)}>
-		  	          <span className="time">&#9716;</span>{Util.timeago(card.deadline, diff)}
+	  	          <FlatButton secondary={true} style={{"color":"black", "fontSize": "10px"}}label={Util.timeago(card.deadline, diff)} labelPosition="after">
+	  	            <FontIcon style={{"verticalAlign": "middle", "fontSize": "14px", "right": "-10px"}}className="material-icons">schedule</FontIcon>
+	  	          </FlatButton>
 	  	        </CardText>
 		  	</Card>
         	<DatePicker

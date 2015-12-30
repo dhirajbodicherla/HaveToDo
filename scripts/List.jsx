@@ -2,6 +2,7 @@ import React from 'react';
 import moment from 'moment';
 import TaskCard from './TaskCard.jsx';
 import InputComponent from './InputComponent.jsx';
+import Util from './util.js';
 
 export default class List extends React.Component{
 	constructor(props){
@@ -17,7 +18,7 @@ export default class List extends React.Component{
 				name: cardLabel
 			};
 		}
-		card['id'] = Math.random().toString(36).substring(7);
+		card['id'] = Util.UUID();
 		list.cards = [card].concat(list.cards);
 
 		this.setState({
@@ -58,7 +59,7 @@ export default class List extends React.Component{
 	  			onDragOver={this.props.dragOver}
 	  			onDragStart={this.props.dragStart}
 		    	onDragEnd={this.props.dragEnd}
-		    	data-list-id={this.state.list.id}>
+		    	data-list-id={this.state.list.id} >
 		    	{inputComponent}
 	    	{listIems}
 	    </ul>;
