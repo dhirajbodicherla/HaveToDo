@@ -25,6 +25,11 @@ export default class List extends React.Component{
 			'list': list
 		}, this.onUpdate.bind(this));
 	}
+	onDelete(card){
+		var cards = this.state.list.cards;
+		this.state.list.cards.splice(cards.indexOf(card), 1);
+		this.setState(this.state, this.onUpdate.bind(this));
+	}
 	onUpdate() {
 		this.props.update();
 	}
@@ -44,7 +49,10 @@ export default class List extends React.Component{
 		
 		if(this.state.list.cards.length != 0){
 			var listIems = this.state.list.cards.map(function(card, i){
-				return <TaskCard card={card} isTodayCard={isTodayCard} update={this.onUpdate.bind(this)}
+				return <TaskCard card={card} 
+								isTodayCard={isTodayCard} 
+								update={this.onUpdate.bind(this)}
+								delete={this.onDelete.bind(this)}
 			    				key={card.id} />
 		    }.bind(this));
 	    }else{

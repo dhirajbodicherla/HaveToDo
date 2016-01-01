@@ -20,12 +20,11 @@ export default class Board extends React.Component{
       if(this.props.items.boards.length){
 	      var endOfToday = moment().endOf('day');
 	      var currentBoard = props.items.boards[0];
-	      var todoList = currentBoard.lists.filter(function(list){
-	      	return list.name === 'Todo';
-	      })[0]
-	      var todayList = currentBoard.lists.filter(function(list){
-	      	return list.name === 'Today';
-	      })[0];
+	      if(props.items.selectedBoard){
+		      currentBoard = props.items.boards.filter(function(board){ return board.id === props.items.selectedBoard; })[0];
+	  	  }
+	      var todoList = currentBoard.lists.filter(function(list){ return list.name === 'Todo'; })[0];
+	      var todayList = currentBoard.lists.filter(function(list){ return list.name === 'Today'; })[0];
 	      for(var i=0;i<todoList.cards.length;i++){
 	      	var deadline = todoList.cards[i].deadline;
 	      	if(deadline && moment(deadline).isBefore(endOfToday)){
@@ -44,6 +43,11 @@ export default class Board extends React.Component{
 	  	};
 	  }
     }
+    componentDidMount(){
+    	if(this.state.isBoardModalOpen){
+    		$(ReactDOM.findDOMNode(this.refs.boardInput)).find('input').focus();
+    	}
+    }
     saveToStorage() {
 		Util.storage.set("havetodo", JSON.stringify(this.props.items));
     }
@@ -58,11 +62,13 @@ export default class Board extends React.Component{
     		board['name'] = name;
     		board['lists'] = Constants.defaultListStructure;
     		this.props.items.boards.push(board);
+    		this.props.items.selectedBoard = board['id'];
     		this.setState({
       			'board': board,
       			'isBoardModalOpen': false
       		}, this.saveToStorage);
-      		this.refs.boardInput.clearValue();
+      		// this.refs.boardInput.clearValue();
+      		$(ReactDOM.findDOMNode(this.refs.boardInput)).find('input').val('').attr('placeholder', 'Enter new board here');
     	}
     }
     boardModalButtonClick(){
@@ -74,12 +80,13 @@ export default class Board extends React.Component{
 		if(value == -1){
 			var state = this.state;
 			state['isBoardModalOpen'] = true;
-			this.setState(state);
+			this.setState(state, function(){
+				$(ReactDOM.findDOMNode(this.refs.boardInput)).find('input').focus();
+			}.bind(this));
 		}else{
 			var newValue = value;
-	      	var board = this.props.items.boards.filter(function(v){
-	      		return v.id == newValue;
-	      	})[0];
+	      	var board = this.props.items.boards.filter(function(v){ return v.id == newValue; })[0];
+	      	this.props.items.selectedBoard = newValue;
 	      	this.setState({
 	      		'board': board
 	      	}, this.saveToStorage);
@@ -197,7 +204,7 @@ export default class Board extends React.Component{
 				<Dialog
 		          title="Create new board"
 		          actions={actions}
-		          modal={true}
+		          modal={false}
 		          open={this.state.isBoardModalOpen}>
 		          	<TextField fullWidth={true} hintText="Enter new board here" ref="boardInput" onEnterKeyDown={this.createBoard.bind(this)}/>
 		        </Dialog>

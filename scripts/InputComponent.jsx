@@ -1,12 +1,9 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
 import moment from 'moment';
 import Card from 'material-ui/lib/card/card';
 import CardHeader from 'material-ui/lib/card/card-header';
-import CardText from 'material-ui/lib/card/card-text';
 import TextField from 'material-ui/lib/text-field';
-import DatePicker from 'material-ui/lib/date-picker/date-picker';
-import DatePickerDialog from 'material-ui/lib/date-picker/date-picker-dialog';
-import Util from './util.js';
 
 export default class InputComponent extends React.Component{
 	constructor(props){
@@ -20,12 +17,14 @@ export default class InputComponent extends React.Component{
 	}
 	createCard(e){
 		var name = $(e.target).val();
-		if(e.keyCode == 13 && name.trim() != ''){
+		if(name.trim() != ''){
 			this.props.addCard(name, {
 				name: name,
-				deadline: this.refs.datepicker.getDate()
+				deadline: ''
 			});
-			this.refs.taskInput.clearValue();
+			var input = ReactDOM.findDOMNode(this.refs.taskInput); 
+			$(input).find('input').val('').attr('placeholder', 'Enter new task');
+			this.refs.taskInput.blur();
 		}
 	}
 	setDeadline(d, dateText){
@@ -39,20 +38,10 @@ export default class InputComponent extends React.Component{
 		this.refs.datepicker.openDialog();
 	}
 	render(){
-		var today = (new Date()).toUTCString();
-		var diff = (this.state.card.deadline !== '') ? moment(today).diff(this.state.card.deadline, 'days') : 0;
 		return <Card expandable={false}>
 			<CardHeader>
-	  	    	<TextField hintText="Enter new task" multiLine={false} ref="taskInput" onKeyUp={this.createCard.bind(this)}/>
+	  	    	<TextField hintText="Enter new task" multiLine={false} ref="taskInput" onEnterKeyDown={this.createCard.bind(this)} defaultValue={this.state.card.name}/>
 	  	    </CardHeader>
-	  	    <CardText className="deadline-container" onClick={this.showDatepicker.bind(this)}>
-	  	          <span className="time">&#9716;</span>{Util.timeago(this.state.card.deadline, diff)}
-  	        </CardText>
-	    	<DatePicker
-	    		ref="datepicker"
-				autoOk={true}
-	  		  	textFieldStyle={{"display": "none"}}
-	  		  	onChange={this.setDeadline.bind(this)} />
 	  	</Card>
 	}
 }

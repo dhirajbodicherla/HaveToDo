@@ -1,6 +1,6 @@
 {
   "name": "havetodo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chrome extension for todo lists on new page",
   "main": "script.js",
   "scripts": {
