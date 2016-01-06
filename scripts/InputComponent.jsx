@@ -4,6 +4,7 @@ import moment from 'moment';
 import Card from 'material-ui/lib/card/card';
 import CardHeader from 'material-ui/lib/card/card-header';
 import TextField from 'material-ui/lib/text-field';
+import Mousetrap from 'Mousetrap';
 
 export default class InputComponent extends React.Component{
 	constructor(props){
@@ -14,6 +15,12 @@ export default class InputComponent extends React.Component{
 				'deadline': ''
 			}
 		};
+	}
+	componentDidMount(){
+		Mousetrap.bind("n", function(){
+			this.refs.taskInput.focus();
+			return false;
+		}.bind(this), 'keydown');
 	}
 	createCard(e){
 		var name = $(e.target).val();

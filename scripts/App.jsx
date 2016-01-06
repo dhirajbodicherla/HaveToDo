@@ -2,8 +2,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 import Board from './Board.jsx';
-import Util from './util.js';
+import Util from './Util.js';
 import Constants from './Constants.js';
+import Alarms from './Alarms.js';
 
 var localData, isExt = 0;
 var mountNode = document.getElementById('body');
@@ -28,6 +29,11 @@ Util.storage.get('havetodo', function(data){
   		localData = (data['havetodo'] != "") ? JSON.parse(data['havetodo']) : {};
 	}else{
 		localData = Constants.defaultItemStructure;
+	}
+	if(Util.countTasks(localData.boards) !== 0){
+		// Alarms.set();
+	}else{
+		// Alarms.clear();
 	}
 	ReactDOM.render(<App items={localData}/> , mountNode);
 });

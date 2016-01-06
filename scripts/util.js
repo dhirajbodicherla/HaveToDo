@@ -50,4 +50,21 @@ Util.UUID = function(){
 	return Math.random().toString(36).substring(7);
 }
 
+Util.getTabIndex = function(){
+
+}
+
+Util.countTasks = function(boards){
+
+	var count = 0;
+	for(var i=0;i<boards.length;i++){
+		// count+=boards[i].lists.map(fun)
+		for(var j=0;j<boards[i].lists.length;j++){
+			count += boards[i].lists[j].cards.length;
+		}
+	}
+	return count;
+
+}
+
 export default Util;

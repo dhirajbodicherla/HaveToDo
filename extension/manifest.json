@@ -1,6 +1,6 @@
 {
   "name": "HaveToDo",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "manifest_version": 2,
   "short_name": "HaveToDo",
   "chrome_url_overrides": {
@@ -20,5 +20,6 @@
   },
   "offline_enabled": true,
   "options_page": "options.html",
-  "incognito": "split"
+  "incognito": "split",
+  "content_security_policy": "script-src 'self' https://ssl.google-analytics.com; object-src 'self'"
 }

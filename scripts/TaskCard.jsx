@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 import moment from 'moment';
-import Util from './util.js';
+import Util from './Util.js';
 import Constants from './Constants.js';
 import DatePicker from 'material-ui/lib/date-picker/date-picker';
 import DatePickerDialog from 'material-ui/lib/date-picker/date-picker-dialog';
@@ -105,7 +105,7 @@ export default class TaskCard extends React.Component{
 	    ];
 
 	  	return <li className="card-container" draggable="true" data-card-id={card.id} ref="listEl">
-		  	<Card expandable={false} style={style}>
+		  	<Card expandable={false} style={style} tabIndex={Util.getTabIndex()}>
 		  		<CardHeader title={card.name} ref="cardName" style={{"width": "240px", "float": "left"}}/>
 		  	    	<TextField hintText="Enter task here" 
 		  	    				multiLine={false} 
@@ -141,7 +141,7 @@ export default class TaskCard extends React.Component{
 	          actions={deleteDialogActions}
 	          modal={false}
 	          open={this.state.isDeleteDialogOpen}
-	          onRequestClose={this.handleDeleteDialogClose}>
+	          onRequestClose={this.handleDeleteDialogClose.bind(this)}>
 	          Are you sure you want to delete?
 	        </Dialog>
 	    </li>;

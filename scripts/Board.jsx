@@ -4,7 +4,7 @@ import ReactCSSTransitionGroup from 'react-addons-css-transition-group';
 import moment from 'moment';
 import InputComponent from './InputComponent.jsx';
 import List from './List.jsx';
-import Util from './util.js';
+import Util from './Util.js';
 import Constants from './Constants.js';
 import ListActions from './ListActions.jsx';
 import DropDownMenu from 'material-ui/lib/DropDownMenu';
@@ -60,14 +60,13 @@ export default class Board extends React.Component{
     		var board = {};
     		board['id'] = Util.UUID();
     		board['name'] = name;
-    		board['lists'] = Constants.defaultListStructure;
+    		board['lists'] = Constants.defaultListStructure();
     		this.props.items.boards.push(board);
     		this.props.items.selectedBoard = board['id'];
     		this.setState({
       			'board': board,
       			'isBoardModalOpen': false
       		}, this.saveToStorage);
-      		// this.refs.boardInput.clearValue();
       		$(ReactDOM.findDOMNode(this.refs.boardInput)).find('input').val('').attr('placeholder', 'Enter new board here');
     	}
     }
@@ -91,6 +90,12 @@ export default class Board extends React.Component{
 	      		'board': board
 	      	}, this.saveToStorage);
 		}
+    }
+    onCardMove(moveDetails){
+    	var newState = this.moveCard(moveDetails.fromList, moveDetails.toList, moveDetails.cardId, moveDetails.cardLocation);
+    	this.setState({
+    		'board': this.state.board
+    	}, this.saveToStorage);
     }
     moveCard(fromList, toList, cardID, cardLocation){
     	var lists = this.state.board.lists, tList, card;     
@@ -122,7 +127,7 @@ export default class Board extends React.Component{
 		this.dragged = $(e.target);
 	    e.dataTransfer.effectAllowed = 'move';
 	    e.dataTransfer.setData("text/html", this.dragged);
-	    this.placeholder = $('<div class="placeholder"></div>');
+	    this.placeholder = $('<li class="placeholder"></li>');
 	}
 	dragOver(e){
 		var e = e.nativeEvent;
@@ -135,12 +140,15 @@ export default class Board extends React.Component{
 	    	this.target.before(this.placeholder);
 	    }
 	}
+	dragEnter(e){
+		// console.log('enter', e.target);
+	}
 	dragEnd(e){
 		var fromList = this.dragged.closest('ul').data('list-id'),
 			toList = this.target.closest('ul').data('list-id'),
 			cardID = this.dragged.data('card-id'),
-			cardLocation = (this.target.index() > this.dragged.index()) ? this.target.index() + 1 : this.target.index() -1;
-		
+			cardLocation = this.placeholder.prevAll('.card-container:visible').length;
+			// console.log('cardlocation', cardLocation, this.target.closest('ul'));
 		var newState = this.moveCard(fromList, toList, cardID, cardLocation);
 		ReactDOM.findDOMNode(this.placeholder[0]).remove();
 		this.dragged.show();
@@ -176,11 +184,9 @@ export default class Board extends React.Component{
 					<p className="list-name">{list.name}</p>
 					<ListActions hasSort={hasSort} sort={this.sortList.bind(this, list.id)}/>
 					<List list={list} 
-							dragOver={this.dragOver.bind(this)}
-							dragEnd={this.dragEnd.bind(this)}
-							dragStart={this.dragStart.bind(this)}
 							hasInput={hasInput}
-							update={this.onUpdate.bind(this)}/>
+							update={this.onUpdate.bind(this)}
+							cardMove={this.onCardMove.bind(this)}/>
 				</li>);
 			}.bind(this));
 			boards = this.props.items.boards.map(function(board){

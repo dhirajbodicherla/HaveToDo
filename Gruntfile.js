@@ -1,3 +1,5 @@
+var port = 9999,
+  Url = 'http://localhost:' + port;
 module.exports = function(grunt) {
 
   grunt.initConfig({
@@ -9,6 +11,14 @@ module.exports = function(grunt) {
         tasks: ['browserify:dev', 'concat:dev', 'copy:dev', 'bell'],
         options: {
           livereload: true
+        }
+      }
+    },
+
+    php: {
+      dist: {
+        options: {
+            port: port
         }
       }
     },
@@ -105,6 +115,13 @@ module.exports = function(grunt) {
       }
     },
 
+    open : {
+      dev : {
+        path: Url,
+        app: 'Google Chrome'
+      }
+    },
+
     bumpup: {
       files: ['package.json', 'bower.json', 'extension/manifest.json']
     },
@@ -114,14 +131,17 @@ module.exports = function(grunt) {
 
   grunt.loadNpmTasks('grunt-contrib-watch');
   grunt.loadNpmTasks('grunt-browserify');
+  grunt.loadNpmTasks('grunt-php');
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-uglify');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-contrib-copy');
   grunt.loadNpmTasks('grunt-contrib-compress');
   grunt.loadNpmTasks('grunt-bumpup');
+  grunt.loadNpmTasks('grunt-open');
   grunt.loadNpmTasks('grunt-bell');
 
+  grunt.registerTask('start', ['php', 'open', 'watch']);
   grunt.registerTask('default', ['browserify:dev', 'concat:dev', 'copy:dev']);
   grunt.registerTask('ext', ['browserify:prod', 'concat:prod', 'uglify:prod', 'copy:prod', 'clean:dev']);
   grunt.registerTask('release', function (type) {

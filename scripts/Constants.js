@@ -1,6 +1,6 @@
 import Util from './Util.js';
 
-const Constants = {
+var Constants = {
 	"colors": [
 		"#FFFFFF", // white
 		"#E6E73B", // yellow
@@ -11,21 +11,23 @@ const Constants = {
 	"defaultItemStructure": {
 	    'boards': []
 	},
-	"defaultListStructure": [
-		{
-		    'name': 'Todo',
-		    'id': Util.UUID(),
-		    'cards': []
-		}, {
-		    'name': 'Today',
-		    'id': Util.UUID(),
-		    'cards': []
-		}, {
-		    'name': 'Done',
-		    'id': Util.UUID(),
-		    'cards': []
-		}
-	]
+	"defaultListStructure": function(){
+		return [
+			{
+			    'name': 'Todo',
+			    'id': Util.UUID(),
+			    'cards': []
+			}, {
+			    'name': 'Today',
+			    'id': Util.UUID(),
+			    'cards': []
+			}, {
+			    'name': 'Done',
+			    'id': Util.UUID(),
+			    'cards': []
+			}
+		];
+	}
 };
 
 export default Constants;
