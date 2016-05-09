@@ -5,6 +5,7 @@ import Board from './Board.jsx';
 import Util from './Util.js';
 import Constants from './Constants.js';
 import Alarms from './Alarms.js';
+import Notifications from './Notifications.js';
 
 var localData, isExt = 0;
 var mountNode = document.getElementById('body');
@@ -35,6 +36,8 @@ Util.storage.get('havetodo', function(data){
 	}else{
 		// Alarms.clear();
 	}
+	// console.log(Notifications);
+	// Notifications.create();
 	ReactDOM.render(<App items={localData}/> , mountNode);
 });
 

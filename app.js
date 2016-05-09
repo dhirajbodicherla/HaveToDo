@@ -17354,6 +17354,3193 @@ Picker.extend( 'pickadate', DatePicker )
 });
 
 },{}],3:[function(require,module,exports){
+
+var options = exports.options = require('./options');
+
+exports.parser = require('./parsers/parser');
+exports.refiner = require('./refiners/refiner');
+
+exports.Parser = exports.parser.Parser;
+exports.Refiner = exports.refiner.Refiner;
+exports.Filter = exports.refiner.Filter;
+
+exports.ParsedResult = require('./result').ParsedResult;
+exports.ParsedComponents = require('./result').ParsedComponents;
+
+var Chrono = function(option) {
+
+    option = option || exports.options.strictOption();
+
+    this.option = option;
+    this.parsers = new Object(option.parsers);
+    this.refiners = new Object(option.refiners);
+}
+
+
+Chrono.prototype.parse = function(text, refDate, opt) {
+
+    refDate = refDate || new Date();
+    opt = opt || {};
+
+    var allResults = [];
+
+    this.parsers.forEach(function (parser) {
+        var results = parser.execute(text, refDate, opt);
+        allResults = allResults.concat(results);
+    });
+
+    allResults.sort(function(a, b) {
+        return a.index - b.index;
+    });
+    
+    this.refiners.forEach(function (refiner) {
+        allResults = refiner.refine(text, allResults, opt);
+    });
+    
+    return allResults;
+};
+
+
+Chrono.prototype.parseDate = function(text, refDate, opt) {
+    var results = this.parse(text, refDate, opt);
+    if (results.length > 0) {
+        return results[0].start.date();
+    }
+    return null;
+}
+
+exports.Chrono = Chrono;
+exports.strict = new Chrono( options.strictOption() );
+exports.casual = new Chrono( options.casualOption() );
+
+exports.parse = function () {
+    return exports.casual.parse.apply(exports.casual, arguments);
+}
+
+exports.parseDate = function () {
+    return exports.casual.parseDate.apply(exports.casual, arguments);
+}
+
+},{"./options":4,"./parsers/parser":26,"./refiners/refiner":34,"./result":35}],4:[function(require,module,exports){
+var parser = require('./parsers/parser');
+var refiner = require('./refiners/refiner');
+
+function baseOption(strictMode) {
+
+    return {
+        parsers: [
+
+            // EN
+            new parser.ENISOFormatParser(strictMode),
+            new parser.ENDeadlineFormatParser(strictMode),
+            new parser.ENMonthNameLittleEndianParser(strictMode),
+            new parser.ENMonthNameMiddleEndianParser(strictMode),
+            new parser.ENMonthNameParser(strictMode),
+            new parser.ENSlashDateFormatParser(strictMode),
+            new parser.ENSlashDateFormatStartWithYearParser(strictMode),
+            new parser.ENSlashMonthFormatParser(strictMode),
+            new parser.ENTimeAgoFormatParser(strictMode),
+            new parser.ENTimeExpressionParser(strictMode),
+
+            // JP
+            new parser.JPStandardParser(strictMode),
+
+            // ES
+            new parser.ESTimeAgoFormatParser(strictMode),
+            new parser.ESDeadlineFormatParser(strictMode),
+            new parser.ESTimeExpressionParser(strictMode),
+            new parser.ESMonthNameLittleEndianParser(strictMode),
+            new parser.ESSlashDateFormatParser(strictMode),
+        ],
+
+        refiners: [
+            // Removing overlaping first
+            new refiner.OverlapRemovalRefiner(),
+
+            // ETC
+            new refiner.ENMergeDateTimeRefiner(),
+            new refiner.ENMergeDateRangeRefiner(),
+            new refiner.JPMergeDateRangeRefiner(),
+
+            // Extract additional info later
+            new refiner.ExtractTimezoneOffsetRefiner(),
+            new refiner.ExtractTimezoneAbbrRefiner(),
+            new refiner.UnlikelyFormatFilter()
+        ]
+    }
+}
+
+
+
+exports.strictOption = function () {
+    return baseOption(true);
+};
+
+
+exports.casualOption = function () {
+
+    var options = baseOption(false);
+
+    // EN
+    options.parsers.unshift(new parser.ENCasualDateParser());
+    options.parsers.unshift(new parser.ENWeekdayParser());
+
+    // JP
+    options.parsers.unshift(new parser.JPCasualDateParser());
+
+    // ES
+    options.parsers.unshift(new parser.ESCasualDateParser());
+    options.parsers.unshift(new parser.ESWeekdayParser());
+
+
+    return options;
+};
+
+},{"./parsers/parser":26,"./refiners/refiner":34}],5:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /(\W|^)(now|today|tonight|tomorrow|tmr|yesterday|last\s*night|this\s*(morning|afternoon|evening))(?=\W|$)/i;
+
+exports.Parser = function ENCasualDateParser(){
+
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        var text = match[0].substr(match[1].length);
+        var index = match.index + match[1].length;
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var refMoment = moment(ref);
+        var startMoment = refMoment.clone();
+        var lowerText = text.toLowerCase();
+
+        if(lowerText == 'tonight'){
+            // Normally means this coming midnight
+            result.start.imply('hour', 22);
+            result.start.imply('meridiem', 1);
+
+        } else if(lowerText == 'tomorrow' || lowerText == 'tmr'){
+
+            // Check not "Tomorrow" on late night
+            if(refMoment.hour() > 1) {
+                startMoment.add(1, 'day');
+            }
+
+        } else if(lowerText == 'yesterday') {
+
+            startMoment.add(-1, 'day');
+        }
+        else if(lowerText.match(/last\s*night/)) {
+
+            result.start.imply('hour', 0);
+            if (refMoment.hour() > 6) {
+                startMoment.add(-1, 'day');
+            }
+
+        } else if (lowerText.match("this")) {
+
+            var secondMatch = match[3].toLowerCase();
+            if (secondMatch == "afternoon") {
+
+                result.start.imply('hour', 15);
+
+            } else if (secondMatch == "evening") {
+
+                result.start.imply('hour', 18);
+
+            } else if (secondMatch == "morning") {
+
+                result.start.imply('hour', 6);
+            }
+
+        } else if (lowerText.match("now")) {
+
+          result.start.imply('hour', refMoment.hour());
+          result.start.imply('minute', refMoment.minute());
+          result.start.imply('second', refMoment.second());
+          result.start.imply('millisecond', refMoment.millisecond());
+
+        }
+
+        result.start.assign('day', startMoment.date())
+        result.start.assign('month', startMoment.month() + 1)
+        result.start.assign('year', startMoment.year())
+        result.tags['ENCasualDateParser'] = true;
+        return result;
+    }
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],6:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /(\W|^)(within|in)\s*([0-9]+|an?|half(?:\s*an?)?)\s*(minutes?|hours?|days?)\s*(?=(?:\W|$))/i;
+
+exports.Parser = function ENDeadlineFormatParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        var index = match.index + match[1].length;
+        var text  = match[0];
+        text  = match[0].substr(match[1].length, match[0].length - match[1].length);
+
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var num = match[3];
+        if (num === 'a' || num === 'an'){
+            num = 1;
+        } else if (num.match(/half/)) {
+            num = 0.5;
+        } else {
+            num = parseInt(num);
+        }
+
+        var date = moment(ref);
+        if (match[4].match(/day/)) {
+            date.add(num, 'd');
+
+            result.start.assign('year', date.year());
+            result.start.assign('month', date.month() + 1);
+            result.start.assign('day', date.date());
+            return result;
+        }
+
+
+        if (match[4].match(/hour/)) {
+
+            date.add(num, 'hour');
+
+        } else if (match[4].match(/minute/)) {
+
+            date.add(num, 'minute');
+        }
+
+        result.start.imply('year', date.year());
+        result.start.imply('month', date.month() + 1);
+        result.start.imply('day', date.date());
+        result.start.assign('hour', date.hour());
+        result.start.assign('minute', date.minute());
+        result.tags['ENDeadlineFormatParser'] = true;
+        return result;
+    };
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],7:[function(require,module,exports){
+/*
+    ISO 8601
+    http://www.w3.org/TR/NOTE-datetime
+    - YYYY-MM-DD
+    - YYYY-MM-DDThh:mmTZD
+    - YYYY-MM-DDThh:mm:ssTZD
+    - YYYY-MM-DDThh:mm:ss.sTZD 
+    - TZD = (Z or +hh:mm or -hh:mm)
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = new RegExp('(\\W|^)' 
+            + '([0-9]{4})\\-([0-9]{1,2})\\-([0-9]{1,2})'
+            + '(?:T' //..
+                + '([0-9]{1,2}):([0-9]{1,2})' // hh:mm
+                + '(?::([0-9]{1,2})(?:\\.(\\d{1,4}))?)?' // :ss.s
+                + '(?:Z|([+-]\\d{2}):?(\\d{2})?)?' // TZD (Z or ±hh:mm or ±hhmm or ±hh)
+            + ')?'  //..
+            + '(?=\\W|$)', 'i');
+
+var YEAR_NUMBER_GROUP = 2;
+var MONTH_NUMBER_GROUP = 3;
+var DATE_NUMBER_GROUP  = 4;
+var HOUR_NUMBER_GROUP  = 5;
+var MINUTE_NUMBER_GROUP = 6;
+var SECOND_NUMBER_GROUP = 7;
+var MILLISECOND_NUMBER_GROUP = 8;
+var TZD_HOUR_OFFSET_GROUP = 9;
+var TZD_MINUTE_OFFSET_GROUP = 10;
+
+exports.Parser = function ENISOFormatParser(){
+    Parser.apply(this, arguments);
+    
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){ 
+        
+        var text = match[0].substr(match[1].length);
+        var index = match.index + match[1].length;
+
+        var result = new ParsedResult({
+            text: text,
+            index: index,
+            ref: ref,
+        })
+        
+        result.start.assign('year', parseInt(match[YEAR_NUMBER_GROUP]));
+        result.start.assign('month', parseInt(match[MONTH_NUMBER_GROUP]));
+        result.start.assign('day', parseInt(match[DATE_NUMBER_GROUP]));
+
+        if (moment(result.start.get('month')) > 12 || moment(result.start.get('month')) < 1 ||
+            moment(result.start.get('day')) > 31 || moment(result.start.get('day')) < 1) {
+            return null;
+        }
+
+        if (match[HOUR_NUMBER_GROUP] != null) {
+            
+            result.start.assign('hour',
+                    parseInt(match[HOUR_NUMBER_GROUP]));
+            result.start.assign('minute',
+                    parseInt(match[MINUTE_NUMBER_GROUP]));
+
+            if (match[SECOND_NUMBER_GROUP] != null) {
+
+                result.start.assign('second',
+                        parseInt(match[SECOND_NUMBER_GROUP]));
+            }
+
+            if (match[MILLISECOND_NUMBER_GROUP] != null) {
+
+                result.start.assign('millisecond',
+                        parseInt(match[MILLISECOND_NUMBER_GROUP]));
+            }
+
+            if (match[TZD_HOUR_OFFSET_GROUP] == null) {
+
+                result.start.assign('timezoneOffset', 0);
+            } else {
+
+                var minuteOffset = 0;
+                var hourOffset = parseInt(match[TZD_HOUR_OFFSET_GROUP]);
+                if (match[TZD_MINUTE_OFFSET_GROUP] != null)
+                    minuteOffset = parseInt(match[TZD_MINUTE_OFFSET_GROUP]);
+
+                var offset = hourOffset * 60;
+                if (offset < 0) {
+                    offset -= minuteOffset;
+                } else {
+                    offset += minuteOffset;
+                }
+
+                result.start.assign('timezoneOffset', offset);
+            }
+        }
+        
+        result.tags['ENISOFormatParser'] = true;
+        return result;
+    };
+
+}
+
+
+},{"../../result":35,"../parser":26,"moment":267}],8:[function(require,module,exports){
+/*
+    
+    
+*/
+
+var moment = require('moment');
+
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var util  = require('../../utils/EN');
+
+var DAYS_OFFSET = { 'sunday': 0, 'sun': 0, 'monday': 1, 'mon': 1,'tuesday': 2, 'tue':2, 'wednesday': 3, 'wed': 3,
+        'thursday': 4, 'thur': 4, 'thu': 4,'friday': 5, 'fri': 5,'saturday': 6, 'sat': 6,}
+    
+var PATTERN = new RegExp('(\\W|^)' +
+        '(?:(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)\\s*,?\\s*)?' + 
+        '([0-9]{1,2})(?:st|nd|rd|th)?' + 
+        '(?:\\s*(?:to|\\-|\\–|until|through|till|\\s)\\s*([0-9]{1,2})(?:st|nd|rd|th)?)?\\s*(?:of)?\\s*' + 
+        '(Jan(?:uary|\\.)?|Feb(?:ruary|\\.)?|Mar(?:ch|\\.)?|Apr(?:il|\\.)?|May|Jun(?:e|\\.)?|Jul(?:y|\\.)?|Aug(?:ust|\\.)?|Sep(?:tember|\\.)?|Oct(?:ober|\\.)?|Nov(?:ember|\\.)?|Dec(?:ember|\\.)?)' +
+        '(?:(\\s*[0-9]{2,4}(?![^\\s]\\d))(\\s*BE)?)?' + 
+        '(?=\\W|$)', 'i'
+    );
+
+var WEEKDAY_GROUP = 2;
+var DATE_GROUP = 3;
+var DATE_TO_GROUP = 4;
+var MONTH_NAME_GROUP = 5;
+var YEAR_GROUP = 6;
+var YEAR_BE_GROUP = 7;
+
+exports.Parser = function ENMonthNameLittleEndianParser(){
+    Parser.apply(this, arguments);
+    
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){ 
+
+        var result = new ParsedResult({
+            text: match[0].substr(match[1].length, match[0].length - match[1].length),
+            index: match.index + match[1].length,
+            ref: ref,
+        });
+
+        var month = match[MONTH_NAME_GROUP];
+        month = util.MONTH_OFFSET[month.toLowerCase()];
+
+        var day = match[DATE_GROUP];
+        day = parseInt(day);
+
+        var year = null;
+        if (match[YEAR_GROUP]) {
+            year = match[YEAR_GROUP];
+            year = parseInt(year);
+
+            if(match[YEAR_BE_GROUP]){ 
+                //BC
+                year = year - 543;
+
+            } else if (year < 100){ 
+
+                year = year + 2000;
+            }
+        }
+
+        if(year){
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.assign('year', year);
+        } else {
+            
+            //Find the most appropriated year
+            var refMoment = moment(ref);
+            refMoment.month(month - 1);
+            refMoment.date(day);
+            refMoment.year(moment(ref).year());
+
+            var nextYear = refMoment.clone().add(1, 'y');
+            var lastYear = refMoment.clone().add(-1, 'y');
+            if( Math.abs(nextYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){  
+                refMoment = nextYear;
+            }
+            else if( Math.abs(lastYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){ 
+                refMoment = lastYear;
+            }
+
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.imply('year', refMoment.year());
+        }
+        
+        // Weekday component
+        if (match[WEEKDAY_GROUP]) {
+            var weekday = match[WEEKDAY_GROUP];
+            weekday = util.WEEKDAY_OFFSET[weekday.toLowerCase()]
+            result.start.assign('weekday', weekday);
+        }
+
+        // Text can be 'range' value. Such as '12 - 13 January 2012'
+        if (match[DATE_TO_GROUP]) {
+            result.end = result.start.clone();
+            result.end.assign('day', parseInt(match[DATE_TO_GROUP]));
+        }
+
+        result.tags['ENMonthNameLittleEndianParser'] = true;
+        return result;
+    };
+}
+
+
+},{"../../result":35,"../../utils/EN":36,"../parser":26,"moment":267}],9:[function(require,module,exports){
+/*
+    
+    The parser for parsing US's date format that begin with month's name.
+    
+    EX. 
+        - January 13
+        - January 13, 2012
+        - January 13 - 15, 2012
+        - Tuesday, January 13, 2012
+
+    Watch out for:
+        - January 12:00
+        - January 12.44
+        - January 1222344
+*/
+
+var moment = require('moment');
+
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var util  = require('../../utils/EN');
+
+var DAYS_OFFSET = { 'sunday': 0, 'sun': 0, 'monday': 1, 'mon': 1,'tuesday': 2, 'tue':2, 'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thur': 4, 'thu': 4,'friday': 5, 'fri': 5,'saturday': 6, 'sat': 6,}
+    
+var PATTERN = new RegExp('(\\W|^)' +
+    '(?:' +
+        '(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun\\.?|Mon\\.?|Tue\\.?|Wed\\.?|Thu\\.?|Fri\\.?|Sat\\.?)' + 
+    '\\s*,?\\s*)?' +
+    '(Jan\\.?|January|Feb\\.?|February|Mar\\.?|March|Apr\\.?|April|May\\.?|Jun\\.?|June|Jul\\.?|July|Aug\\.?|August|Sep\\.?|Sept\\.?|September|Oct\\.?|October|Nov\\.?|November|Dec\\.?|December)' + 
+    '\\s*' +
+    '([0-9]{1,2})(?:st|nd|rd|th)?\\s*' + 
+    '(?:' + 
+        '(?:to|\\-)\\s*' + 
+        '([0-9]{1,2})(?:st|nd|rd|th)?\\s*' + 
+    ')?' + 
+    '(?:' +
+        '\\s*,?\\s*([0-9]{4})(\\s*BE)?\\s*' +
+    ')?' + 
+    '(?=\\W|$)(?!\\:\\d)', 'i');
+
+var WEEKDAY_GROUP = 2;
+var MONTH_NAME_GROUP = 3;
+var DATE_GROUP = 4;
+var DATE_TO_GROUP = 5;
+var YEAR_GROUP = 6;
+var YEAR_BE_GROUP = 7;
+
+exports.Parser = function ENMonthNameMiddleEndianParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){
+
+        if (text.indexOf('5 May 12:00') >= 0) {
+            console.log(match)
+        }
+
+        var result = new ParsedResult({
+            text: match[0].substr(match[1].length, match[0].length - match[1].length),
+            index: match.index + match[1].length,
+            ref: ref,
+        });
+
+        
+        var month = match[MONTH_NAME_GROUP];
+        month = util.MONTH_OFFSET[month.toLowerCase()];
+
+        var day = match[DATE_GROUP];
+        day = parseInt(day);
+
+        var year = null;
+        if (match[YEAR_GROUP]) {
+            year = match[YEAR_GROUP];
+            year = parseInt(year);
+
+            if(match[YEAR_BE_GROUP]){ 
+                //BC
+                year = year - 543;
+
+            } else if (year < 100){ 
+
+                year = year + 2000;
+            }
+        }
+
+        if(year){
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.assign('year', year);
+        } else {
+            
+            //Find the most appropriated year
+            var refMoment = moment(ref);
+            refMoment.month(month - 1);
+            refMoment.date(day);
+
+            var nextYear = refMoment.clone().add(1, 'y');
+            var lastYear = refMoment.clone().add(-1, 'y');
+            if( Math.abs(nextYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){  
+                refMoment = nextYear;
+            }
+            else if( Math.abs(lastYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){ 
+                refMoment = lastYear;
+            }
+
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.imply('year', refMoment.year());
+        }
+        
+        // Weekday component
+        if (match[WEEKDAY_GROUP]) {
+            var weekday = match[WEEKDAY_GROUP];
+            weekday = util.WEEKDAY_OFFSET[weekday.toLowerCase()]
+            result.start.assign('weekday', weekday);
+        }
+
+        // Text can be 'range' value. Such as 'January 12 - 13, 2012'
+        if (match[DATE_TO_GROUP]) {
+            result.end = result.start.clone();
+            result.end.assign('day', parseInt(match[DATE_TO_GROUP]));
+        }
+
+        result.tags['ENMonthNameMiddleEndianParser'] = true;
+        return result;
+    }
+}
+
+
+},{"../../result":35,"../../utils/EN":36,"../parser":26,"moment":267}],10:[function(require,module,exports){
+/*
+    
+    The parser for parsing month name and year.
+    
+    EX. 
+        - January
+        - January 2012
+        - January, 2012
+*/
+
+var moment = require('moment');
+
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var util  = require('../../utils/EN');
+
+    
+var PATTERN = new RegExp('(^|\\D\\s+|[^\\w\\s])' +
+    '(Jan\\.?|January|Feb\\.?|February|Mar\\.?|March|Apr\\.?|April|May\\.?|Jun\\.?|June|Jul\\.?|July|Aug\\.?|August|Sep\\.?|Sept\\.?|September|Oct\\.?|October|Nov\\.?|November|Dec\\.?|December)' + 
+    '\\s*' +
+    '(?:' +
+        ',?\\s*([0-9]{4})(\\s*BE)?' +
+    ')?' +
+    '(?=[^\\s\\w]|$)', 'i');
+
+
+var MONTH_NAME_GROUP = 2;
+var YEAR_GROUP = 3;
+var YEAR_BE_GROUP = 4;
+
+exports.Parser = function ENMonthNameParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){
+        var result = new ParsedResult({
+            text: match[0].substr(match[1].length, match[0].length - match[1].length),
+            index: match.index + match[1].length,
+            ref: ref,
+        });
+
+        
+        var month = match[MONTH_NAME_GROUP];
+        month = util.MONTH_OFFSET[month.toLowerCase()];
+
+        var day = 1;
+
+        var year = null;
+        if (match[YEAR_GROUP]) {
+            year = match[YEAR_GROUP];
+            year = parseInt(year);
+
+            if(match[YEAR_BE_GROUP]){ 
+                //BC
+                year = year - 543;
+
+            } else if (year < 100){ 
+
+                year = year + 2000;
+            }
+        }
+
+        if(year){
+            result.start.imply('day', day);
+            result.start.assign('month', month);
+            result.start.assign('year', year);
+        } else {
+            
+            //Find the most appropriated year
+            var refMoment = moment(ref);
+            refMoment.month(month - 1);
+            refMoment.date(day);
+
+            var nextYear = refMoment.clone().add(1, 'y');
+            var lastYear = refMoment.clone().add(-1, 'y');
+            if( Math.abs(nextYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){  
+                refMoment = nextYear;
+            }
+            else if( Math.abs(lastYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){ 
+                refMoment = lastYear;
+            }
+
+            result.start.imply('day', day);
+            result.start.assign('month', month);
+            result.start.imply('year', refMoment.year());
+        }
+
+        result.tags['ENMonthNameParser'] = true;
+        return result;
+    }
+}
+
+
+},{"../../result":35,"../../utils/EN":36,"../parser":26,"moment":267}],11:[function(require,module,exports){
+/*
+    Date format with slash "/" (also "-" and ".") between numbers 
+    - Tuesday 11/3/2015
+    - 11/3/2015
+    - 11/3
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = new RegExp('(\\W|^)' + 
+    '(?:' + 
+        '((?:sun|mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?)(?:day)?)' +
+        '\\s*\\,?\\s*' +
+    ')?' + 
+    '([0-9]{1,2})[\\/\\.\\-]([0-9]{1,2})' + 
+    '(?:' + 
+        '[\\/\\.\\-]' + 
+        '([0-9]{4}|[0-9]{2})' + 
+    ')?' + 
+    '(\\W|$)', 'i');
+
+var DAYS_OFFSET = { 'sunday': 0, 'sun': 0, 'monday': 1, 'mon': 1,'tuesday': 2, 'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thur': 4,'friday': 5, 'fri': 5,'saturday': 6, 'sat': 6,}
+
+
+var OPENNING_GROUP = 1;
+var ENDING_GROUP = 6;
+
+var WEEKDAY_GROUP = 2;
+var MONTH_GROUP = 3;
+var DAY_GROUP = 4;
+var YEAR_GROUP = 5;
+
+exports.Parser = function ENSlashDateFormatParser(argument) {
+    Parser.apply(this, arguments);
+
+    this.pattern = function () { return PATTERN; };
+    this.extract = function(text, ref, match, opt){
+        
+        if(match[OPENNING_GROUP] == '/' || match[ENDING_GROUP] == '/') {
+            // Long skip, if there is some overlapping like:
+            // XX[/YY/ZZ]
+            // [XX/YY/]ZZ
+            match.index += match[0].length
+            return;
+        }
+
+        var index = match.index + match[OPENNING_GROUP].length;
+        var text = match[0].substr(match[OPENNING_GROUP].length, match[0].length - match[ENDING_GROUP].length);
+
+
+        var result = new ParsedResult({
+            text: text,
+            index: index,
+            ref: ref,
+        });
+            
+        if(text.match(/^\d\.\d$/)) return;
+        if(text.match(/^\d\.\d{1,2}\.\d{1,2}$/)) return;
+        
+        // MM/dd -> OK
+        // MM.dd -> NG
+        if(!match[YEAR_GROUP] && match[0].indexOf('/') < 0) return;
+
+        var date = null;
+        var year = match[YEAR_GROUP] || moment(ref).year() + '';
+        var month = match[MONTH_GROUP];
+        var day   = match[DAY_GROUP];
+        
+        month = parseInt(month);
+        day  = parseInt(day);
+        year = parseInt(year);
+
+        if(month < 1 || month > 12) {
+            if(month > 12) {
+                // dd/mm/yyyy date format if day looks like a month, and month
+                // looks like a day.
+                if (day >= 1 && day <= 12 && month >= 13 && month <= 31) {
+                    // unambiguous
+                    var tday = month;
+                    month = day;
+                    day = tday;
+                }
+                else {
+                    // both month and day are <= 12
+                    return null;
+                }
+            }
+        }
+        if(day < 1 || day > 31) return null;
+
+        if(year < 100){
+            if (year > 50) {
+                year = year + 1900; 
+            } else {
+                year = year + 2000; 
+            }
+        }
+
+        result.start.assign('day', day);
+        result.start.assign('month', month);
+        result.start.assign('year', year);
+
+        //Day of week
+        if(match[WEEKDAY_GROUP]) {
+            result.start.assign('weekday', DAYS_OFFSET[match[WEEKDAY_GROUP].toLowerCase()]);
+        }
+
+        result.tags['ENSlashDateFormatParser'] = true;
+        return result;
+    };
+};
+
+},{"../../result":35,"../parser":26,"moment":267}],12:[function(require,module,exports){
+/*
+    Date format with slash "/" between numbers like ENSlashDateFormatParser,
+    but this parser expect year before month and date. 
+    - YYYY/MM/DD
+    - YYYY-MM-DD
+    - YYYY.MM.DD
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = new RegExp('(\\W|^)' 
+            + '([0-9]{4})[\\-\\.\\/]([0-9]{1,2})[\\-\\.\\/]([0-9]{1,2})'
+            + '(?=\\W|$)', 'i');
+
+var YEAR_NUMBER_GROUP = 2;
+var MONTH_NUMBER_GROUP = 3;
+var DATE_NUMBER_GROUP  = 4;
+
+exports.Parser = function ENSlashDateFormatStartWithYearParser(){
+    Parser.apply(this, arguments);
+    
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){
+
+        var text = match[0].substr(match[1].length);
+        var index = match.index + match[1].length;
+
+        var result = new ParsedResult({
+            text: text,
+            index: index,
+            ref: ref,
+        })
+        
+        result.start.assign('year', parseInt(match[YEAR_NUMBER_GROUP]));
+        result.start.assign('month', parseInt(match[MONTH_NUMBER_GROUP]));
+        result.start.assign('day', parseInt(match[DATE_NUMBER_GROUP]));
+
+        if (moment(result.start.get('month')) > 12 || moment(result.start.get('month')) < 1 ||
+            moment(result.start.get('day')) > 31 || moment(result.start.get('day')) < 1) {
+            return null;
+        }
+        
+        result.tags['ENDateFormatParser'] = true;
+        return result;
+    };
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],13:[function(require,module,exports){
+/*
+    Month/Year date format with slash "/" (also "-" and ".") between numbers 
+    - 11/05
+    - 06/2005
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = new RegExp('(^|[^\\d/]\\s+|[^\\w\\s])' +
+    '([0-9]|0[1-9]|1[012])/([0-9]{4})' + 
+    '([^\\d/]|$)', 'i');
+
+var OPENNING_GROUP = 1;
+var ENDING_GROUP = 4;
+
+var MONTH_GROUP = 2;
+var YEAR_GROUP = 3;
+
+exports.Parser = function ENSlashMonthFormatParser(argument) {
+    Parser.apply(this, arguments);
+
+    this.pattern = function () { return PATTERN; };
+    this.extract = function(text, ref, match, opt){
+        
+        var index = match.index + match[OPENNING_GROUP].length;
+        var text = match[0].substr(match[OPENNING_GROUP].length, match[0].length - (1 + match[ENDING_GROUP].length)).trim();
+
+        var result = new ParsedResult({
+            text: text,
+            index: index,
+            ref: ref,
+        });
+
+        var date = null;
+        var year = match[YEAR_GROUP] ;
+        var month = match[MONTH_GROUP];
+        var day   = 1;
+        
+        month = parseInt(month);
+        year = parseInt(year);
+
+        result.start.imply('day', day);
+        result.start.assign('month', month);
+        result.start.assign('year', year);
+
+        result.tags['ENSlashMonthFormatParser'] = true;
+        return result;
+    };
+};
+
+},{"../../result":35,"../parser":26,"moment":267}],14:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /(\W|^)(?:within\s*)?([0-9]+|an?|half(?:\s*an?)?)\s*(minutes?|hours?|weeks?|days?|months?|years?)\s*(?:ago|before|earlier)(?=(?:\W|$))/i;
+var STRICT_PATTERN = /(\W|^)(?:within\s*)?([0-9]+|an?)\s*(minutes?|hours?|days?)\s*ago(?=(?:\W|$))/i;
+
+exports.Parser = function ENTimeAgoFormatParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() {
+        return this.isStrictMode()? STRICT_PATTERN : PATTERN;
+    }
+
+    this.extract = function(text, ref, match, opt){
+
+        if (match.index > 0 && text[match.index-1].match(/\w/)) return null;
+
+        var text = match[0];
+        text  = match[0].substr(match[1].length, match[0].length - match[1].length);
+        index = match.index + match[1].length;
+
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var num = match[2];
+        if(num === 'a' || num === 'an'){
+            num = 1;
+        } else if (num.match(/half/)) {
+            num = 0.5;
+        } else {
+            num = parseInt(num);
+        }
+
+        var date = moment(ref);
+
+        if (match[3].match(/hour/) || match[3].match(/minute/)) {
+            if (match[3].match(/hour/)) {
+
+                date.add(-num, 'hour');
+
+            } else if (match[3].match(/minute/)) {
+
+                date.add(-num, 'minute');
+            }
+
+            result.start.imply('day', date.date());
+            result.start.imply('month', date.month() + 1);
+            result.start.imply('year', date.year());
+            result.start.assign('hour', date.hour());
+            result.start.assign('minute', date.minute());
+            result.tags['ENTimeAgoFormatParser'] = true;
+            return result;
+        }
+
+        if (match[3].match(/week/)) {
+            date.add(-num, 'week');
+
+            result.start.imply('day', date.date());
+            result.start.imply('month', date.month() + 1);
+            result.start.imply('year', date.year());
+            result.start.imply('weekday', date.day());
+            return result;
+        }
+
+        if (match[3].match(/day/)) {
+            date.add(-num, 'd');
+        }
+
+        if (match[3].match(/month/)) {
+            date.add(-num, 'month');
+        }
+
+        if (match[3].match(/year/)) {
+
+            date.add(-num, 'year');
+        }
+
+        result.start.assign('day', date.date());
+        result.start.assign('month', date.month() + 1);
+        result.start.assign('year', date.year());
+        return result;
+
+    };
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],15:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+var ParsedComponents = require('../../result').ParsedComponents;
+
+var FIRST_REG_PATTERN  = new RegExp("(^|\\s|T)" +
+    "(?:(?:at|from)\\s*)?" + 
+    "(\\d{1,4}|noon|midnight)" + 
+    "(?:" + 
+        "(?:\\.|\\:|\\：)(\\d{1,2})" + 
+        "(?:" + 
+            "(?:\\:|\\：)(\\d{2})" + 
+        ")?" + 
+    ")?" + 
+    "(?:\\s*(A\\.M\\.|P\\.M\\.|AM?|PM?))?" + 
+    "(?=\\W|$)", 'i');
+
+
+var SECOND_REG_PATTERN = new RegExp("^\\s*" + 
+    "(\\-|\\–|\\~|\\〜|to|\\?)\\s*" + 
+    "(\\d{1,4})" +
+    "(?:" + 
+        "(?:\\.|\\:|\\：)(\\d{1,2})" + 
+        "(?:" + 
+            "(?:\\.|\\:|\\：)(\\d{1,2})" + 
+        ")?" + 
+    ")?" + 
+    "(?:\\s*(A\\.M\\.|P\\.M\\.|AM?|PM?))?" + 
+    "(?=\\W|$)", 'i');
+
+var HOUR_GROUP    = 2;
+var MINUTE_GROUP  = 3;
+var SECOND_GROUP  = 4;
+var AM_PM_HOUR_GROUP = 5;
+
+
+exports.Parser = function ENTimeExpressionParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return FIRST_REG_PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){ 
+        
+        // This pattern can be overlaped Ex. [12] AM, 1[2] AM
+        if (match.index > 0 && text[match.index-1].match(/\w/)) return null;
+        var refMoment = moment(ref);
+        var result = new ParsedResult();
+        result.ref = ref;
+        result.index = match.index + match[1].length;
+        result.text  = match[0].substring(match[1].length);
+        result.tags['ENTimeExpressionParser'] = true;
+
+        result.start.imply('day',   refMoment.date());
+        result.start.imply('month', refMoment.month()+1);
+        result.start.imply('year',  refMoment.year());
+        
+        var hour = 0;
+        var minute = 0;
+        var meridiem = -1;
+
+        // ----- Second
+        if(match[SECOND_GROUP] != null){ 
+            var second = parseInt(match[SECOND_GROUP]);
+            if(second >= 60) return null;
+
+            result.start.assign('second', second);
+        }
+        
+        // ----- Hours
+        if (match[HOUR_GROUP].toLowerCase() == "noon"){
+            meridiem = 1; 
+            hour = 12;
+        } else if (match[HOUR_GROUP].toLowerCase() == "midnight") {
+            meridiem = 0; 
+            hour = 0;
+        } else {
+            hour = parseInt(match[HOUR_GROUP]);
+        }
+        
+        // ----- Minutes
+        if(match[MINUTE_GROUP] != null){ 
+            minute = parseInt(match[MINUTE_GROUP]);
+        } else if(hour > 100) { 
+            minute = hour%100;
+            hour   = parseInt(hour/100);
+        } 
+        
+        if(minute >= 60) {
+            return null;
+        }
+
+        if(hour > 24) {
+            return null;
+        }
+        if (hour >= 12) { 
+            meridiem = 1;
+        }
+
+        // ----- AM & PM  
+        if(match[AM_PM_HOUR_GROUP] != null) {
+            if(hour > 12) return null;
+            var ampm = match[AM_PM_HOUR_GROUP][0].toLowerCase();
+            if(ampm == "a"){
+                meridiem = 0; 
+                if(hour == 12) hour = 0;
+            }
+            
+            if(ampm == "p"){
+                meridiem = 1; 
+                if(hour != 12) hour += 12;
+            }
+        } 
+
+        result.start.assign('hour', hour);
+        result.start.assign('minute', minute);
+
+        if (meridiem >= 0) {
+            result.start.assign('meridiem', meridiem);
+        } else {
+            if (hour < 12) {
+                result.start.imply('meridiem', 0);
+            } else {
+                result.start.imply('meridiem', 1);
+            }
+        }
+        
+        // ==============================================================
+        //                  Extracting the 'to' chunk
+        // ==============================================================
+        match = SECOND_REG_PATTERN.exec(text.substring(result.index + result.text.length));
+        if (!match) {
+            // Not accept number only result
+            if (result.text.match(/^\d+$/)) { 
+                return null;
+            }
+            return result;
+        }
+
+
+
+        // Pattern "YY.YY -XXXX" is more like timezone offset
+        if (match[0].match(/^\s*(\+|\-)\s*\d{3,4}$/)) {
+            return result;
+        }
+
+        if(result.end == null){
+            result.end = new ParsedComponents(null, result.start.date());
+        }
+
+        var hour = 0;
+        var minute = 0;
+        var meridiem = -1;
+
+        // ----- Second
+        if(match[SECOND_GROUP] != null){ 
+            var second = parseInt(match[SECOND_GROUP]);
+            if(second >= 60) return null;
+
+            result.end.assign('second', second);
+        }
+
+        hour = parseInt(match[2]);
+        
+        // ----- Minute
+        if (match[MINUTE_GROUP]!= null) {
+            
+            minute = parseInt(match[MINUTE_GROUP]);
+            if(minute >= 60) return result;
+            
+        } else if (hour > 100) {
+
+            minute = hour%100;
+            hour   = parseInt(hour/100);
+        }
+
+        if(minute >= 60) {
+            return null;
+        }
+
+        if(hour > 24) {
+            return null;
+        }
+        if (hour >= 12) { 
+            meridiem = 1;
+        }
+        
+        // ----- AM & PM 
+        if (match[AM_PM_HOUR_GROUP] != null){
+
+            if (hour > 12) return null;
+
+            if(match[AM_PM_HOUR_GROUP][0].toLowerCase() == "a"){
+                meridiem = 0; 
+                if(hour == 12) {
+                    hour = 0;
+                    if (!result.end.isCertain('day')) {
+                        result.end.imply('day', result.end.get('day') + 1);
+                    }
+                }
+            }
+            
+            if(match[AM_PM_HOUR_GROUP][0].toLowerCase() == "p"){
+                meridiem = 1; 
+                if(hour != 12) hour += 12;
+            }
+            
+            if (!result.start.isCertain('meridiem')) {
+                if (meridiem == 0) {
+                    
+                    result.start.imply('meridiem', 0);
+                    
+                    if (result.start.get('hour') == 12) {
+                        result.start.assign('hour', 0);
+                    }
+
+                } else {
+
+                    result.start.imply('meridiem', 1);
+                    
+                    if (result.start.get('hour') != 12) {
+                        result.start.assign('hour', result.start.get('hour') + 12); 
+                    }
+                }
+            }
+        }
+
+        result.text = result.text + match[0];
+        result.end.assign('hour', hour);
+        result.end.assign('minute', minute);
+        if (meridiem >= 0) {
+            result.end.assign('meridiem', meridiem);
+        } else {
+            var startAtPM = result.start.isCertain('meridiem') && result.start.get('meridiem') == 1;
+            if (startAtPM && result.start.get('hour') > hour) {
+                // 10pm - 1 (am)
+                result.end.imply('meridiem', 0);
+
+            } else if (hour > 12) {
+                result.end.imply('meridiem', 1);
+            }
+        }
+
+        if (result.end.date().getTime() < result.start.date().getTime()) {
+            result.end.imply('day', result.end.get('day') + 1)
+        }
+        
+        return result;
+    }
+}
+
+
+},{"../../result":35,"../parser":26,"moment":267}],16:[function(require,module,exports){
+/*
+
+
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var DAYS_OFFSET = { 'sunday': 0, 'sun': 0, 'monday': 1, 'mon': 1,'tuesday': 2, 'tues':2, 'tue':2, 'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thurs':4, 'thur': 4, 'thu': 4,'friday': 5, 'fri': 5,'saturday': 6, 'sat': 6,}
+
+var PATTERN = new RegExp('(\\W|^)' +
+    '(?:(?:\\,|\\(|\\（)\\s*)?' +
+    '(?:(this|last|next)\\s*)?' +
+    '(' + Object.keys(DAYS_OFFSET).join('|') + ')' +
+    '(?:\\s*(?:\\,|\\)|\\）))?' +
+    '(?:\\s*(this|last|next)\\s*week)?' +
+    '(?=\\W|$)', 'i');
+
+var PREFIX_GROUP = 2;
+var WEEKDAY_GROUP = 3;
+var POSTFIX_GROUP = 4;
+
+exports.Parser = function ENWeekdayParser() {
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+        var index = match.index + match[1].length;
+        var text = match[0].substr(match[1].length, match[0].length - match[1].length);
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var dayOfWeek = match[WEEKDAY_GROUP].toLowerCase();
+        var offset = DAYS_OFFSET[dayOfWeek];
+        if(offset === undefined) return null;
+
+        var startMoment = moment(ref);
+        var prefix = match[PREFIX_GROUP];
+        var postfix = match[POSTFIX_GROUP];
+
+        if (prefix || postfix) {
+            var norm = prefix || postfix;
+            norm = norm.toLowerCase();
+
+            if(norm == 'last')
+                startMoment.day(offset - 7)
+            else if(norm == 'next')
+                startMoment.day(offset + 7)
+            else if(norm== 'this')
+                startMoment.day(offset);
+        } else{
+            var refOffset = startMoment.day();
+            if ( opt.forwardDatesOnly && refOffset > offset ) {
+              startMoment.day(offset + 7);
+            } else if (!opt.forwardDatesOnly && Math.abs(offset - 7 - refOffset) < Math.abs(offset - refOffset)) {
+              startMoment.day(offset - 7);
+            } else if (!opt.forwardDatesOnly && Math.abs(offset + 7 - refOffset) < Math.abs(offset - refOffset)) {
+              startMoment.day(offset + 7);
+            } else {
+              startMoment.day(offset);
+            }
+        }
+
+        result.start.assign('weekday', offset);
+        result.start.imply('day', startMoment.date())
+        result.start.imply('month', startMoment.month() + 1)
+        result.start.imply('year', startMoment.year())
+        return result;
+    }
+}
+
+
+},{"../../result":35,"../parser":26,"moment":267}],17:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+/*
+  Valid patterns:
+  - esta mañana -> today in the morning
+  - esta tarde -> today in the afternoon/evening
+  - esta noche -> tonight
+  - ayer por la mañana -> yesterday in the morning
+  - ayer por la tarde -> yesterday in the afternoon/evening
+  - ayer por la noche -> yesterday at night
+  - mañana por la mañana -> tomorrow in the morning
+  - mañana por la tarde -> tomorrow in the afternoon/evening
+  - mañana por la noche -> tomorrow at night
+  - anoche -> tomorrow at night
+  - hoy -> today
+  - ayer -> yesterday
+  - mañana -> tomorrow
+ */
+var PATTERN = /(\W|^)(ahora|esta\s*(mañana|tarde|noche)|(ayer|mañana)\s*por\s*la\s*(mañana|tarde|noche)|hoy|mañana|ayer|anoche)(?=\W|$)/i;
+
+exports.Parser = function ESCasualDateParser(){
+
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        var text = match[0].substr(match[1].length);
+        var index = match.index + match[1].length;
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var refMoment = moment(ref);
+        var startMoment = refMoment.clone();
+        var lowerText = text.toLowerCase().replace(/\s+/g, ' ');
+
+        if(lowerText == 'mañana'){
+
+            // Check not "Tomorrow" on late night
+            if(refMoment.hour() > 1) {
+                startMoment.add(1, 'day');
+            }
+
+        } else if(lowerText == 'ayer') {
+
+            startMoment.add(-1, 'day');
+        }
+        else if(lowerText == 'anoche') {
+
+            result.start.imply('hour', 0);
+            if (refMoment.hour() > 6) {
+                startMoment.add(-1, 'day');
+            }
+
+        } else if (lowerText.match("esta")) {
+
+            var secondMatch = match[3].toLowerCase();
+            if (secondMatch == "tarde") {
+
+                result.start.imply('hour', 18);
+
+            } else if (secondMatch == "mañana") {
+
+                result.start.imply('hour', 6);
+
+            } else if (secondMatch == "noche") {
+
+              // Normally means this coming midnight
+              result.start.imply('hour', 22);
+              result.start.imply('meridiem', 1);
+
+            }
+        } else if (lowerText.match(/por\s*la/)) {
+
+            var firstMatch = match[4].toLowerCase();
+            if (firstMatch === 'ayer') {
+
+              startMoment.add(-1, 'day');
+
+            } else if (firstMatch === 'mañana') {
+
+              startMoment.add(1, 'day');
+
+            }
+
+            var secondMatch = match[5].toLowerCase();
+            if (secondMatch == "tarde") {
+
+                result.start.imply('hour', 18);
+
+            } else if (secondMatch == "mañana") {
+
+                result.start.imply('hour', 9);
+
+            } else if (secondMatch == "noche") {
+
+              // Normally means this coming midnight
+              result.start.imply('hour', 22);
+              result.start.imply('meridiem', 1);
+
+            }
+
+        } else if (lowerText.match("ahora")) {
+
+          result.start.imply('hour', refMoment.hour());
+          result.start.imply('minute', refMoment.minute());
+          result.start.imply('second', refMoment.second());
+          result.start.imply('millisecond', refMoment.millisecond());
+
+        }
+
+        result.start.assign('day', startMoment.date())
+        result.start.assign('month', startMoment.month() + 1)
+        result.start.assign('year', startMoment.year())
+        result.tags['ESCasualDateParser'] = true;
+        return result;
+    }
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],18:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /(\W|^)(dentro\s*de|en)\s*([0-9]+|medi[oa]|una?)\s*(minutos?|horas?|d[ií]as?)\s*(?=(?:\W|$))/i;
+
+exports.Parser = function ESDeadlineFormatParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        var index = match.index + match[1].length;
+        var text  = match[0];
+        text  = match[0].substr(match[1].length, match[0].length - match[1].length);
+
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var num = parseInt(match[3]);
+        if (isNaN(num)) {
+          if (match[3].match(/medi/)) {
+            num = 0.5;
+          } else {
+            num = 1;
+          }
+        }
+
+        var date = moment(ref);
+        if (match[4].match(/d[ií]a/)) {
+            date.add(num, 'd');
+
+            result.start.assign('year', date.year());
+            result.start.assign('month', date.month() + 1);
+            result.start.assign('day', date.date());
+            return result;
+        }
+
+
+        if (match[4].match(/hora/)) {
+
+            date.add(num, 'hour');
+
+        } else if (match[4].match(/minuto/)) {
+
+            date.add(num, 'minute');
+        }
+
+        result.start.imply('year', date.year());
+        result.start.imply('month', date.month() + 1);
+        result.start.imply('day', date.date());
+        result.start.assign('hour', date.hour());
+        result.start.assign('minute', date.minute());
+        result.tags['ESDeadlineFormatParser'] = true;
+        return result;
+    };
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],19:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var util  = require('../../utils/ES');
+
+var DAYS_OFFSET = util.WEEKDAY_OFFSET;
+
+var PATTERN = new RegExp('(\\W|^)' +
+        '(?:(Domingo|Lunes|Martes|Miércoles|Miercoles|Jueves|Viernes|Sábado|Sabado|Dom|Lun|Mar|Mie|Jue|Vie|Sab)\\s*,?\\s*)?' +
+        '([0-9]{1,2})(?:º|ª|°)?' +
+        '(?:\\s*(?:desde|de|\\-|\\–|al?|hasta|\\s)\\s*([0-9]{1,2})(?:º|ª|°)?)?\\s*(?:de)?\\s*' +
+        '(Ene(?:ro|\\.)?|Feb(?:rero|\\.)?|Mar(?:zo|\\.)?|Abr(?:il|\\.)?|May(?:o|\\.)?|Jun(?:io|\\.)?|Jul(?:io|\\.)?|Ago(?:sto|\\.)?|Sep(?:tiembre|\\.)?|Oct(?:ubre|\\.)?|Nov(?:iembre|\\.)?|Dic(?:iembre|\\.)?)' +
+        '(?:\\s*(?:del?)?(\\s*[0-9]{2,4}(?![^\\s]\\d))(\\s*AC)?)?' +
+        '(?=\\W|$)', 'i'
+    );
+
+var WEEKDAY_GROUP = 2;
+var DATE_GROUP = 3;
+var DATE_TO_GROUP = 4;
+var MONTH_NAME_GROUP = 5;
+var YEAR_GROUP = 6;
+var YEAR_BE_GROUP = 7;
+
+exports.Parser = function ESMonthNameLittleEndianParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        var result = new ParsedResult({
+            text: match[0].substr(match[1].length, match[0].length - match[1].length),
+            index: match.index + match[1].length,
+            ref: ref,
+        });
+
+        var month = match[MONTH_NAME_GROUP];
+        month = util.MONTH_OFFSET[month.toLowerCase()];
+
+        var day = match[DATE_GROUP];
+        day = parseInt(day);
+
+        var year = null;
+        if (match[YEAR_GROUP]) {
+            year = match[YEAR_GROUP];
+            year = parseInt(year);
+
+            if(match[YEAR_BE_GROUP]){
+                //BC
+                year = year - 543;
+
+            } else if (year < 100){
+
+                year = year + 2000;
+            }
+        }
+
+        if(year){
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.assign('year', year);
+        } else {
+
+            //Find the most appropriated year
+            var refMoment = moment(ref);
+            refMoment.month(month - 1);
+            refMoment.date(day);
+            refMoment.year(moment(ref).year());
+
+            var nextYear = refMoment.clone().add(1, 'y');
+            var lastYear = refMoment.clone().add(-1, 'y');
+            if( Math.abs(nextYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){
+                refMoment = nextYear;
+            }
+            else if( Math.abs(lastYear.diff(moment(ref))) < Math.abs(refMoment.diff(moment(ref))) ){
+                refMoment = lastYear;
+            }
+
+            result.start.assign('day', day);
+            result.start.assign('month', month);
+            result.start.imply('year', refMoment.year());
+        }
+
+        // Weekday component
+        if (match[WEEKDAY_GROUP]) {
+            var weekday = match[WEEKDAY_GROUP];
+            weekday = util.WEEKDAY_OFFSET[weekday.toLowerCase()]
+            result.start.assign('weekday', weekday);
+        }
+
+        // Text can be 'range' value. Such as '12 - 13 January 2012'
+        if (match[DATE_TO_GROUP]) {
+            result.end = result.start.clone();
+            result.end.assign('day', parseInt(match[DATE_TO_GROUP]));
+        }
+
+        result.tags['ESMonthNameLittleEndianParser'] = true;
+        return result;
+    };
+}
+
+},{"../../result":35,"../../utils/ES":37,"../parser":26,"moment":267}],20:[function(require,module,exports){
+/*
+    Date format with slash "/" (also "-" and ".") between numbers
+    - Martes 3/11/2015
+    - 3/11/2015
+    - 3/11
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = new RegExp('(\\W|^)' +
+    '(?:' +
+        '((?:domingo|dom|lunes|lun|martes|mar|mi[ée]rcoles|mie|jueves|jue|viernes|vie|s[áa]bado|sab))' +
+        '\\s*\\,?\\s*' +
+    ')?' +
+    '([0-9]{1,2})[\\/\\.\\-]([0-9]{1,2})' +
+    '(?:' +
+        '[\\/\\.\\-]' +
+        '([0-9]{4}|[0-9]{2})' +
+    ')?' +
+    '(\\W|$)', 'i');
+
+var DAYS_OFFSET = { 'domingo': 0, 'dom': 0, 'lunes': 1, 'lun': 1, 'martes': 2, 'mar': 2, 'miercoles': 3, 'miércoles': 3, 'mie': 3,
+    'jueves': 4, 'jue': 4, 'viernes': 5, 'vier': 5, 'sábado': 6, 'sabado': 6, 'sab': 6,}
+
+
+var OPENNING_GROUP = 1;
+var ENDING_GROUP = 6;
+
+// in Spanish we use day/month/year
+var WEEKDAY_GROUP = 2;
+var MONTH_GROUP = 4;
+var DAY_GROUP = 3;
+var YEAR_GROUP = 5;
+
+exports.Parser = function ESSlashDateFormatParser(argument) {
+    Parser.apply(this, arguments);
+
+    this.pattern = function () { return PATTERN; };
+    this.extract = function(text, ref, match, opt){
+
+        if(match[OPENNING_GROUP] == '/' || match[ENDING_GROUP] == '/') {
+            // Long skip, if there is some overlapping like:
+            // XX[/YY/ZZ]
+            // [XX/YY/]ZZ
+            match.index += match[0].length
+            return;
+        }
+
+        var index = match.index + match[OPENNING_GROUP].length;
+        var text = match[0].substr(match[OPENNING_GROUP].length, match[0].length - match[ENDING_GROUP].length);
+
+
+        var result = new ParsedResult({
+            text: text,
+            index: index,
+            ref: ref,
+        });
+
+        if(text.match(/^\d\.\d$/)) return;
+        if(text.match(/^\d\.\d{1,2}\.\d{1,2}$/)) return;
+
+        // MM/dd -> OK
+        // MM.dd -> NG
+        if(!match[YEAR_GROUP] && match[0].indexOf('/') < 0) return;
+
+        var date = null;
+        var year = match[YEAR_GROUP] || moment(ref).year() + '';
+        var month = match[MONTH_GROUP];
+        var day   = match[DAY_GROUP];
+
+        month = parseInt(month);
+        day  = parseInt(day);
+        year = parseInt(year);
+
+        if(month < 1 || month > 12) {
+            if(month > 12) {
+                // dd/mm/yyyy date format if day looks like a month, and month
+                // looks like a day.
+                if (day >= 1 && day <= 12 && month >= 13 && month <= 31) {
+                    // unambiguous
+                    var tday = month;
+                    month = day;
+                    day = tday;
+                }
+                else {
+                    // both month and day are <= 12
+                    return null;
+                }
+            }
+        }
+        if(day < 1 || day > 31) return null;
+
+        if(year < 100){
+            if(year > 50){
+                year = year + 2500 - 543; //BE
+            }else{
+                year = year + 2000; //AD
+            }
+        }
+
+        result.start.assign('day', day);
+        result.start.assign('month', month);
+        result.start.assign('year', year);
+
+        //Day of week
+        if(match[WEEKDAY_GROUP]) {
+            result.start.assign('weekday', DAYS_OFFSET[match[WEEKDAY_GROUP].toLowerCase()]);
+        }
+
+        result.tags['ESSlashDateFormatParser'] = true;
+        return result;
+    };
+};
+
+},{"../../result":35,"../parser":26,"moment":267}],21:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /(\W|^)hace\s*([0-9]+|medi[oa]|una?)\s*(minutos?|horas?|semanas?|d[ií]as?|mes(es)?|años?)(?=(?:\W|$))/i;
+
+exports.Parser = function ESTimeAgoFormatParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() {
+        return PATTERN;
+    }
+
+    this.extract = function(text, ref, match, opt){
+
+        if (match.index > 0 && text[match.index-1].match(/\w/)) return null;
+
+        var text = match[0];
+        text  = match[0].substr(match[1].length, match[0].length - match[1].length);
+        index = match.index + match[1].length;
+
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var num = parseInt(match[2]);
+        if (isNaN(num)) {
+          if (match[2].match(/medi/)) {
+            num = 0.5;
+          } else {
+            num = 1;
+          }
+        }
+
+        var date = moment(ref);
+
+        if (match[3].match(/hora/) || match[3].match(/minuto/)) {
+            if (match[3].match(/hora/)) {
+
+                date.add(-num, 'hour');
+
+            } else if (match[3].match(/minuto/)) {
+
+                date.add(-num, 'minute');
+            }
+
+            result.start.imply('day', date.date());
+            result.start.imply('month', date.month() + 1);
+            result.start.imply('year', date.year());
+            result.start.assign('hour', date.hour());
+            result.start.assign('minute', date.minute());
+            result.tags['ESTimeAgoFormatParser'] = true;
+            return result;
+        }
+
+        if (match[3].match(/semana/)) {
+            date.add(-num, 'week');
+
+            result.start.imply('day', date.date());
+            result.start.imply('month', date.month() + 1);
+            result.start.imply('year', date.year());
+            result.start.imply('weekday', date.day());
+            return result;
+        }
+
+        if (match[3].match(/d[ií]a/)) {
+            date.add(-num, 'd');
+        }
+
+        if (match[3].match(/mes/)) {
+            date.add(-num, 'month');
+        }
+
+        if (match[3].match(/año/)) {
+
+            date.add(-num, 'year');
+        }
+
+        result.start.assign('day', date.date());
+        result.start.assign('month', date.month() + 1);
+        result.start.assign('year', date.year());
+        return result;
+
+    };
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],22:[function(require,module,exports){
+/*
+
+
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+var ParsedComponents = require('../../result').ParsedComponents;
+
+var FIRST_REG_PATTERN  = new RegExp("(^|\\s|T)" +
+    "(?:(?:a las?|al?|desde|de)\\s*)?" +
+    "(\\d{1,4}|mediod[ií]a|medianoche)" +
+    "(?:" +
+        "(?:\\.|\\:|\\：)(\\d{1,2})" +
+        "(?:" +
+            "(?:\\:|\\：)(\\d{2})" +
+        ")?" +
+    ")?" +
+    "(?:\\s*(A\\.M\\.|P\\.M\\.|AM?|PM?))?" +
+    "(?=\\W|$)", 'i');
+
+
+var SECOND_REG_PATTERN = new RegExp("^\\s*" +
+    "(\\-|\\–|\\~|\\〜|a(?:\s*las)?|\\?)\\s*" +
+    "(\\d{1,4})" +
+    "(?:" +
+        "(?:\\.|\\:|\\：)(\\d{1,2})" +
+        "(?:" +
+            "(?:\\.|\\:|\\：)(\\d{1,2})" +
+        ")?" +
+    ")?" +
+    "(?:\\s*(A\\.M\\.|P\\.M\\.|AM?|PM?))?" +
+    "(?=\\W|$)", 'i');
+
+var HOUR_GROUP    = 2;
+var MINUTE_GROUP  = 3;
+var SECOND_GROUP  = 4;
+var AM_PM_HOUR_GROUP = 5;
+
+exports.Parser = function ESTimeExpressionParser(){
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return FIRST_REG_PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+
+        // This pattern can be overlaped Ex. [12] AM, 1[2] AM
+        if (match.index > 0 && text[match.index-1].match(/\w/)) return null;
+        var refMoment = moment(ref);
+        var result = new ParsedResult();
+        result.ref = ref;
+        result.index = match.index + match[1].length;
+        result.text  = match[0].substring(match[1].length);
+        result.tags['ESTimeExpressionParser'] = true;
+
+        result.start.imply('day',   refMoment.date());
+        result.start.imply('month', refMoment.month()+1);
+        result.start.imply('year',  refMoment.year());
+
+        var hour = 0;
+        var minute = 0;
+        var meridiem = -1;
+
+        // ----- Second
+        if(match[SECOND_GROUP] != null){
+            var second = parseInt(match[SECOND_GROUP]);
+            if(second >= 60) return null;
+
+            result.start.assign('second', second);
+        }
+
+        // ----- Hours
+        if (match[HOUR_GROUP].toLowerCase().match(/mediod/)){
+            meridiem = 1;
+            hour = 12;
+        } else if (match[HOUR_GROUP].toLowerCase() == "medianoche") {
+            meridiem = 0;
+            hour = 0;
+        } else {
+            hour = parseInt(match[HOUR_GROUP]);
+        }
+
+        // ----- Minutes
+        if(match[MINUTE_GROUP] != null){
+            minute = parseInt(match[MINUTE_GROUP]);
+        } else if(hour > 100) {
+            minute = hour%100;
+            hour   = parseInt(hour/100);
+        }
+
+        if(minute >= 60) {
+            return null;
+        }
+
+        if(hour > 24) {
+            return null;
+        }
+        if (hour >= 12) {
+            meridiem = 1;
+        }
+
+        // ----- AM & PM
+        if(match[AM_PM_HOUR_GROUP] != null) {
+            if(hour > 12) return null;
+            var ampm = match[AM_PM_HOUR_GROUP][0].toLowerCase();
+            if(ampm == "a"){
+                meridiem = 0;
+                if(hour == 12) hour = 0;
+            }
+
+            if(ampm == "p"){
+                meridiem = 1;
+                if(hour != 12) hour += 12;
+            }
+        }
+        result.start.assign('hour', hour);
+        result.start.assign('minute', minute);
+        if (meridiem >= 0) {
+            result.start.assign('meridiem', meridiem);
+        }
+
+        // ==============================================================
+        //                  Extracting the 'to' chunk
+        // ==============================================================
+        match = SECOND_REG_PATTERN.exec(text.substring(result.index + result.text.length));
+        if (!match) {
+            // Not accept number only result
+            if (result.text.match(/^\d+$/)) {
+                return null;
+            }
+            return result;
+        }
+
+
+
+        // Pattern "YY.YY -XXXX" is more like timezone offset
+        if (match[0].match(/^\s*(\+|\-)\s*\d{3,4}$/)) {
+            return result;
+        }
+
+        if(result.end == null){
+            result.end = new ParsedComponents(null, result.start.date());
+        }
+
+        var hour = 0;
+        var minute = 0;
+        var meridiem = -1;
+
+        // ----- Second
+        if(match[SECOND_GROUP] != null){
+            var second = parseInt(match[SECOND_GROUP]);
+            if(second >= 60) return null;
+
+            result.end.assign('second', second);
+        }
+
+        hour = parseInt(match[2]);
+
+        // ----- Minute
+        if (match[MINUTE_GROUP]!= null) {
+
+            minute = parseInt(match[MINUTE_GROUP]);
+            if(minute >= 60) return result;
+
+        } else if (hour > 100) {
+
+            minute = hour%100;
+            hour   = parseInt(hour/100);
+        }
+
+        if(minute >= 60) {
+            return null;
+        }
+
+        if(hour > 24) {
+            return null;
+        }
+        if (hour >= 12) {
+            meridiem = 1;
+        }
+
+        // ----- AM & PM
+        if (match[AM_PM_HOUR_GROUP] != null){
+
+            if (hour > 12) return null;
+
+            if(match[AM_PM_HOUR_GROUP][0].toLowerCase() == "a"){
+                meridiem = 0;
+                if(hour == 12) {
+                    hour = 0;
+                    if (!result.end.isCertain('day')) {
+                        result.end.imply('day', result.end.get('day') + 1);
+                    }
+                }
+            }
+
+            if(match[AM_PM_HOUR_GROUP][0].toLowerCase() == "p"){
+                meridiem = 1;
+                if(hour != 12) hour += 12;
+            }
+
+            if (!result.start.isCertain('meridiem')) {
+                if (meridiem == 0) {
+
+                    result.start.imply('meridiem', 0);
+
+                    if (result.start.get('hour') == 12) {
+                        result.start.assign('hour', 0);
+                    }
+
+                } else {
+
+                    result.start.imply('meridiem', 1);
+
+                    if (result.start.get('hour') != 12) {
+                        result.start.assign('hour', result.start.get('hour') + 12);
+                    }
+                }
+            }
+
+        } else if(hour >= 12) {
+            meridiem = 1;
+        }
+
+        result.text = result.text + match[0];
+        result.end.assign('hour', hour);
+        result.end.assign('minute', minute);
+        if (meridiem >= 0) {
+            result.end.assign('meridiem', meridiem);
+        }
+
+        if (result.end.date().getTime() < result.start.date().getTime()) {
+            result.end.imply('day', result.end.get('day') + 1)
+        }
+
+        return result;
+    }
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],23:[function(require,module,exports){
+/*
+
+
+*/
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var DAYS_OFFSET = { 'domingo': 0, 'dom': 0, 'lunes': 1, 'lun': 1, 'martes': 2, 'mar':2, 'miercoles': 3, 'miércoles': 3, 'mie': 3,
+    'jueves': 4, 'jue': 4, 'viernes': 5, 'vier': 5, 'sabado': 6, 'sábado': 6, 'sab': 6,}
+
+var PATTERN = new RegExp('(\\W|^)' +
+    '(?:(?:\\,|\\(|\\（)\\s*)?' +
+    '(?:(este|pasado|pr[oó]ximo)\\s*)?' +
+    '(' + Object.keys(DAYS_OFFSET).join('|') + ')' +
+    '(?:\\s*(?:\\,|\\)|\\）))?' +
+    '(?:\\s*(este|pasado|pr[óo]ximo)\\s*week)?' +
+    '(?=\\W|$)', 'i');
+
+var PREFIX_GROUP = 2;
+var WEEKDAY_GROUP = 3;
+var POSTFIX_GROUP = 4;
+
+exports.Parser = function ESWeekdayParser() {
+    Parser.apply(this, arguments);
+
+    this.pattern = function() { return PATTERN; }
+
+    this.extract = function(text, ref, match, opt){
+        var index = match.index + match[1].length;
+        var text = match[0].substr(match[1].length, match[0].length - match[1].length);
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var dayOfWeek = match[WEEKDAY_GROUP].toLowerCase();
+        var offset = DAYS_OFFSET[dayOfWeek];
+        if(offset === undefined) return null;
+
+        var startMoment = moment(ref);
+        var prefix = match[PREFIX_GROUP];
+        var postfix = match[POSTFIX_GROUP];
+
+        if (prefix || postfix) {
+            var norm = prefix || postfix;
+            norm = norm.toLowerCase();
+
+            if(norm == 'pasado')
+                startMoment.day(offset - 7)
+            else if(norm == 'próximo' || norm == 'proximo')
+                startMoment.day(offset + 7)
+            else if(norm== 'este')
+                startMoment.day(offset);
+        } else{
+            var refOffset = startMoment.day();
+            if ( opt.forwardDatesOnly && refOffset > offset ) {
+              startMoment.day(offset + 7);
+            } else if (!opt.forwardDatesOnly && Math.abs(offset - 7 - refOffset) < Math.abs(offset - refOffset)) {
+              startMoment.day(offset - 7);
+            } else if (!opt.forwardDatesOnly && Math.abs(offset + 7 - refOffset) < Math.abs(offset - refOffset)) {
+              startMoment.day(offset + 7);
+            } else {
+              startMoment.day(offset);
+            }
+        }
+
+        result.start.assign('weekday', offset);
+        result.start.imply('day', startMoment.date())
+        result.start.imply('month', startMoment.month() + 1)
+        result.start.imply('year', startMoment.year())
+        return result;
+    }
+}
+
+},{"../../result":35,"../parser":26,"moment":267}],24:[function(require,module,exports){
+/*
+    
+    
+*/
+
+var moment = require('moment');
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var PATTERN = /今日|当日|昨日|明日|今夜|今夕|今晩|今朝/i;
+
+exports.Parser = function JPCasualDateParser(){
+    
+    Parser.apply(this, arguments);
+        
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){ 
+        
+        var index = match.index;
+        var text = match[0];
+        var result = new ParsedResult({
+            index: index,
+            text: text,
+            ref: ref,
+        });
+
+        var refMoment = moment(ref);
+        var startMoment = refMoment.clone();
+
+        if(text == '今夜' || text == '今夕' || text == '今晩'){
+            // Normally means this coming midnight 
+            result.start.imply('hour', 22);
+            result.start.imply('meridiem', 1);
+
+        } else if(text == '明日'){
+
+            // Check not "Tomorrow" on late night
+            if(refMoment.hour() > 4) {
+                startMoment.add(1, 'day');
+            }
+
+        } else if(text == '昨日') {
+
+            startMoment.add(-1, 'day');
+
+        } else if (text.match("今朝")) {
+
+            result.start.imply('hour', 6);
+            result.start.imply('meridiem', 0);
+        }
+
+        result.start.assign('day', startMoment.date())
+        result.start.assign('month', startMoment.month() + 1)
+        result.start.assign('year', startMoment.year())
+        result.tags['JPCasualDateParser'] = true;
+        return result;
+    }
+}
+
+
+},{"../../result":35,"../parser":26,"moment":267}],25:[function(require,module,exports){
+/*
+    
+    
+*/
+
+var moment = require('moment');
+
+var Parser = require('../parser').Parser;
+var ParsedResult = require('../../result').ParsedResult;
+
+var util  = require('../../utils/JP'); 
+var PATTERN = /(?:(同|((昭和|平成)?([0-9０-９]{2,4})))年\s*)?([0-9０-９]{1,2})月\s*([0-9０-９]{1,2})日/i;
+  
+var YEAR_GROUP        = 2;
+var ERA_GROUP         = 3;
+var YEAR_NUMBER_GROUP = 4;
+var MONTH_GROUP       = 5;
+var DAY_GROUP         = 6;
+
+exports.Parser = function JPStandardParser(){
+    Parser.apply(this, arguments);
+    
+    this.pattern = function() { return PATTERN; }
+    
+    this.extract = function(text, ref, match, opt){ 
+
+        var startMoment = moment(ref);
+        var result = new ParsedResult({
+            text: match[0],
+            index: match.index,
+            ref: ref,
+        });
+        
+        var month = match[MONTH_GROUP];
+        month = util.toHankaku(month);
+        month = parseInt(month);
+
+        var day = match[DAY_GROUP];
+        day = util.toHankaku(day);
+        day = parseInt(day);
+
+        startMoment.set('date', day);
+        startMoment.set('month', month - 1);
+        result.start.assign('day', startMoment.date());
+        result.start.assign('month', startMoment.month() + 1);
+            
+        if (!match[YEAR_GROUP]) {
+            
+            //Find the most appropriated year
+            startMoment.year(moment(ref).year());
+            var nextYear = startMoment.clone().add(1, 'y');
+            var lastYear = startMoment.clone().add(-1, 'y');
+            if( Math.abs(nextYear.diff(moment(ref))) < Math.abs(startMoment.diff(moment(ref))) ){  
+                startMoment = nextYear;
+            }
+            else if( Math.abs(lastYear.diff(moment(ref))) < Math.abs(startMoment.diff(moment(ref))) ){ 
+                startMoment = lastYear;
+            }
+
+            result.start.assign('day', startMoment.date());
+            result.start.assign('month', startMoment.month() + 1);
+            result.start.imply('year', startMoment.year());
+
+        } else if (match[YEAR_GROUP].match('同年')) {
+
+            result.start.assign('year', startMoment.year());
+
+        } else {
+            var year = match[YEAR_NUMBER_GROUP];
+            year = util.toHankaku(year);
+            year = parseInt(year);
+
+            if (match[ERA_GROUP] == '平成') {
+                year += 1988;
+            } else if (match[ERA_GROUP] == '昭和') {
+                year += 1925;
+            }
+
+            result.start.assign('year', year);
+        }
+        
+
+        result.tags['JPStandardParser'] = true;
+        return result;
+    };
+
+}
+
+
+},{"../../result":35,"../../utils/JP":38,"../parser":26,"moment":267}],26:[function(require,module,exports){
+
+function Parser(strictMode) {
+
+    this.isStrictMode = function() { return (strictMode == true) };
+
+    this.pattern = function() { return /./i; }
+
+    this.extract = function(text, ref, match, opt){ return null; }
+
+    this.execute = function(text, ref, opt) {
+
+        var results = [];
+        var regex = this.pattern();
+
+        var remainingText = text;
+        var match = regex.exec(remainingText);
+
+        while (match) {
+
+            // Calculate match index on the full text;
+            match.index += text.length - remainingText.length;
+
+            var result = this.extract(text, ref, match, opt);
+            if (result) {
+
+                // If success, start from the end of the result
+                remainingText = text.substring(result.index + result.text.length);
+
+                if (!this.isStrictMode() || result.hasPossibleDates()) {
+                    results.push(result);
+                }
+
+            } else {
+                // If fail, move on by 1
+                remainingText = text.substring(match.index + 1);
+            }
+
+            match = regex.exec(remainingText);
+        }
+
+        if (this.refiners) {
+            this.refiners.forEach(function () {
+                results = refiner.refine(results, text, options);
+            });
+        }
+
+        return results;
+    }
+}
+
+exports.Parser = Parser;
+
+exports.ENISOFormatParser = require('./EN/ENISOFormatParser').Parser;
+exports.ENDeadlineFormatParser = require('./EN/ENDeadlineFormatParser').Parser;
+exports.ENMonthNameLittleEndianParser = require('./EN/ENMonthNameLittleEndianParser').Parser;
+exports.ENMonthNameMiddleEndianParser = require('./EN/ENMonthNameMiddleEndianParser').Parser;
+exports.ENMonthNameParser = require('./EN/ENMonthNameParser').Parser;
+exports.ENSlashDateFormatParser = require('./EN/ENSlashDateFormatParser').Parser;
+exports.ENSlashDateFormatStartWithYearParser = require('./EN/ENSlashDateFormatStartWithYearParser').Parser;
+exports.ENSlashMonthFormatParser = require('./EN/ENSlashMonthFormatParser').Parser;
+exports.ENTimeAgoFormatParser = require('./EN/ENTimeAgoFormatParser').Parser;
+exports.ENTimeExpressionParser = require('./EN/ENTimeExpressionParser').Parser;
+exports.ENWeekdayParser = require('./EN/ENWeekdayParser').Parser;
+exports.ENCasualDateParser = require('./EN/ENCasualDateParser').Parser;
+
+exports.JPStandardParser = require('./JP/JPStandardParser').Parser;
+exports.JPCasualDateParser = require('./JP/JPCasualDateParser').Parser;
+
+
+exports.ESCasualDateParser = require('./ES/ESCasualDateParser').Parser;
+exports.ESDeadlineFormatParser = require('./ES/ESDeadlineFormatParser').Parser;
+exports.ESTimeAgoFormatParser = require('./ES/ESTimeAgoFormatParser').Parser;
+exports.ESTimeExpressionParser = require('./ES/ESTimeExpressionParser').Parser;
+exports.ESWeekdayParser = require('./ES/ESWeekdayParser').Parser;
+exports.ESMonthNameLittleEndianParser = require('./ES/ESMonthNameLittleEndianParser').Parser;
+exports.ESSlashDateFormatParser = require('./ES/ESSlashDateFormatParser').Parser;
+
+},{"./EN/ENCasualDateParser":5,"./EN/ENDeadlineFormatParser":6,"./EN/ENISOFormatParser":7,"./EN/ENMonthNameLittleEndianParser":8,"./EN/ENMonthNameMiddleEndianParser":9,"./EN/ENMonthNameParser":10,"./EN/ENSlashDateFormatParser":11,"./EN/ENSlashDateFormatStartWithYearParser":12,"./EN/ENSlashMonthFormatParser":13,"./EN/ENTimeAgoFormatParser":14,"./EN/ENTimeExpressionParser":15,"./EN/ENWeekdayParser":16,"./ES/ESCasualDateParser":17,"./ES/ESDeadlineFormatParser":18,"./ES/ESMonthNameLittleEndianParser":19,"./ES/ESSlashDateFormatParser":20,"./ES/ESTimeAgoFormatParser":21,"./ES/ESTimeExpressionParser":22,"./ES/ESWeekdayParser":23,"./JP/JPCasualDateParser":24,"./JP/JPStandardParser":25}],27:[function(require,module,exports){
+/*
+  
+*/
+var Refiner = require('../refiner').Refiner;
+
+exports.Refiner = function ENMergeDateRangeRefiner() {
+    Refiner.call(this);
+
+    this.pattern = function () { return /^\s*(to|\-)\s*$/i };
+
+    this.refine = function(text, results, opt) {
+
+        if (results.length < 2) return results;
+        
+        var mergedResult = []
+        var currResult = null;
+        var prevResult = null;
+        
+        for (var i=1; i<results.length; i++){
+            
+            currResult = results[i];
+            prevResult = results[i-1];
+            
+            if (!prevResult.end && !currResult.end 
+                && this.isAbleToMerge(text, prevResult, currResult)) {
+              
+                prevResult = this.mergeResult(text, prevResult, currResult);
+                currResult = null;
+                i += 1;
+            }
+            
+            mergedResult.push(prevResult);
+        }
+        
+        if (currResult != null) {
+            mergedResult.push(currResult);
+        }
+
+
+        return mergedResult;
+    }
+
+    this.isAbleToMerge = function(text, result1, result2) {
+        var begin = result1.index + result1.text.length;
+        var end   = result2.index;
+        var textBetween = text.substring(begin,end);
+
+        return textBetween.match(this.pattern());
+    }
+
+    this.mergeResult = function(text, fromResult, toResult) {
+
+        for (var key in toResult.start.knownValues) {
+            if (!fromResult.start.isCertain(key)) {
+                fromResult.start.assign(key, toResult.start.get(key));
+            }
+        }
+
+        for (var key in fromResult.start.knownValues) {
+            if (!toResult.start.isCertain(key)) {
+                toResult.start.assign(key, fromResult.start.get(key));
+            }
+        }
+
+        if (fromResult.start.date().getTime() > toResult.start.date()) {
+            var tmp = toResult;
+            toResult = fromResult;
+            fromResult = tmp;
+        }
+        
+        fromResult.end = toResult.start;
+
+        
+
+        for (var tag in toResult.tags) {
+            fromResult.tags[tag] = true;
+        }
+
+            
+        var startIndex = Math.min(fromResult.index, toResult.index);
+        var endIndex = Math.max(
+            fromResult.index + fromResult.text.length, 
+            toResult.index + toResult.text.length);
+            
+        fromResult.index = startIndex;
+        fromResult.text  = text.substring(startIndex, endIndex);
+        fromResult.tags[this.constructor.name] = true;
+        return fromResult;
+    }
+}
+
+
+},{"../refiner":34}],28:[function(require,module,exports){
+/*
+    
+*/
+var ParsedComponents = require('../../result').ParsedComponents;
+var Refiner = require('../refiner').Refiner;
+
+
+
+var PATTERN = new RegExp("^\\s*(T|at|on|of|,|-)?\\s*$");
+
+function isDateOnly(result) {
+    return !result.start.isCertain('hour');
+}
+    
+function isTimeOnly(result) {
+    return !result.start.isCertain('month') && !result.start.isCertain('weekday');
+}
+
+
+function isAbleToMerge(text, prevResult, curResult) {
+    var textBetween = text.substring(prevResult.index + prevResult.text.length, curResult.index);
+    return textBetween.match(PATTERN);
+}
+
+function mergeResult(text, dateResult, timeResult){
+
+    var beginDate = dateResult.start;
+    var beginTime = timeResult.start;
+        
+    var beginDateTime = beginDate.clone();
+    beginDateTime.assign('hour', beginTime.get('hour'));
+    beginDateTime.assign('minute', beginTime.get('minute'));
+    beginDateTime.assign('second', beginTime.get('second'));
+        
+    if (beginTime.isCertain('meridiem')) {
+        beginDateTime.assign('meridiem', beginTime.get('meridiem'));
+    } else if (
+        beginTime.get('meridiem') !== undefined &&
+        beginDateTime.get('meridiem') === undefined
+    ) {
+        beginDateTime.imply('meridiem', beginTime.get('meridiem'));
+    }
+
+    if (beginDateTime.get('meridiem') == 1 && beginDateTime.get('hour') < 12) {
+        beginDateTime.assign('hour', beginDateTime.get('hour') + 12);
+    }
+
+    if (dateResult.end != null || timeResult.end != null) {
+        
+        var endDate   = dateResult.end == null ? dateResult.start : dateResult.end;            
+        var endTime   = timeResult.end == null ? timeResult.start : timeResult.end;
+
+        var endDateTime = endDate.clone();
+        endDateTime.assign('hour', endTime.get('hour'));
+        endDateTime.assign('minute', endTime.get('minute'));
+        endDateTime.assign('second', endTime.get('second'));
+        
+        if (endTime.isCertain('meridiem')) {
+            endDateTime.assign('meridiem', endTime.get('meridiem'));
+        } else if (beginTime.get('meridiem') != null) {
+            endDateTime.imply('meridiem', endTime.get('meridiem'));
+        }
+        
+        if (dateResult.end == null && endDateTime.date().getTime() < beginDateTime.date().getTime()) {
+            // Ex. 9pm - 1am
+            if (endDateTime.isCertain('day')) {
+                endDateTime.assign('day', endDateTime.get('day') + 1);
+            } else {
+                endDateTime.imply('day', endDateTime.get('day') + 1);
+            }
+        }
+
+        dateResult.end = endDateTime;
+    }
+
+    dateResult.start = beginDateTime;    
+
+    var startIndex = Math.min(dateResult.index, timeResult.index);
+    var endIndex = Math.max(
+            dateResult.index + dateResult.text.length, 
+            timeResult.index + timeResult.text.length);
+    
+    dateResult.index = startIndex;
+    dateResult.text  = text.substring(startIndex, endIndex);
+
+    for (var tag in timeResult.tags) {
+        dateResult.tags[tag] = true;
+    }
+    dateResult.tags['ENMergeDateAndTimeRefiner'] = true;
+    return dateResult;
+}
+
+exports.Refiner = function ENMergeDateTimeRefiner() {
+    Refiner.call(this);
+
+
+    this.refine = function(text, results, opt) { 
+
+        if (results.length < 2) return results;
+
+        var mergedResult = [];
+        var currResult = null;
+        var prevResult = null;
+
+        for (var i = 1; i < results.length; i++) {
+
+            currResult = results[i];
+            prevResult = results[i-1];
+            
+            if (isDateOnly(prevResult) && isTimeOnly(currResult) 
+                    && isAbleToMerge(text, prevResult, currResult)) {
+                
+                prevResult = mergeResult(text, prevResult, currResult);
+                currResult = null;
+                i += 1;
+                
+            } else if (isDateOnly(currResult) && isTimeOnly(prevResult)
+                    && isAbleToMerge(text, prevResult, currResult)) {
+                
+                prevResult = mergeResult(text, currResult, prevResult);
+                currResult = null;
+                i += 1;
+            }
+            
+            mergedResult.push(prevResult);
+        }
+
+        if (currResult != null) {
+            mergedResult.push(currResult);
+        }
+
+        return mergedResult;
+    }
+}
+},{"../../result":35,"../refiner":34}],29:[function(require,module,exports){
+/*
+  
+*/
+var Refiner = require('./refiner').Refiner;
+
+// Map ABBR -> Offset in minute
+var TIMEZONE_ABBR_MAP = {};
+var TIMEZONE_NAME_PATTERN = new RegExp("^\\s*\\(?([A-Z]{2,4})\\)?(?=\\W|$)", 'i');
+
+exports.Refiner = function ExtractTimezoneAbbrRefiner() {
+	Refiner.call(this);
+
+	this.refine = function(text, results, opt) {
+
+		results.forEach(function(result) {
+
+            if (!result.tags['ENTimeExpressionParser']) {
+                return;
+            }
+
+            var match = TIMEZONE_NAME_PATTERN.exec(text.substring(result.index + result.text.length));
+            if (match) {
+                var timezoneAbbr = match[1].toUpperCase();
+                if (TIMEZONE_ABBR_MAP[timezoneAbbr] === undefined) {
+                    return;
+                }
+
+                var timezoneOffset = TIMEZONE_ABBR_MAP[timezoneAbbr];
+                if (!result.start.isCertain('timezoneOffset')) {
+                    result.start.assign('timezoneOffset', timezoneOffset);
+                }
+
+                if (result.end != null && !result.end.isCertain('timezoneOffset')) {
+                    result.end.assign('timezoneOffset', timezoneOffset);
+                }
+
+                result.text += match[0];
+                result.tags['ExtractTimezoneAbbrRefiner'] = true;
+            }
+		});
+
+        return results;
+	}
+}
+
+// TODO: Move this to some configuration
+TIMEZONE_ABBR_MAP = {"ACDT":630,"ACST":570,"ADT":-180,"AEDT":660,"AEST":600,"AFT":270,"AKDT":-480,"AKST":-540,"ALMT":360,"AMST":-180,"AMT":-240,"ANAST":720,"ANAT":720,"AQTT":300,"ART":-180,"AST":-240,"AWDT":540,"AWST":480,"AZOST":0,"AZOT":-60,"AZST":300,"AZT":240,"BNT":480,"BOT":-240,"BRST":-120,"BRT":-180,"BST":60,"BTT":360,"CAST":480,"CAT":120,"CCT":390,"CDT":-300,"CEST":120,"CET":60,"CHADT":825,"CHAST":765,"CKT":-600,"CLST":-180,"CLT":-240,"COT":-300,"CST":-360,"CVT":-60,"CXT":420,"ChST":600,"DAVT":420,"EASST":-300,"EAST":-360,"EAT":180,"ECT":-300,"EDT":-240,"EEST":180,"EET":120,"EGST":0,"EGT":-60,"EST":-300,"ET":-300,"FJST":780,"FJT":720,"FKST":-180,"FKT":-240,"FNT":-120,"GALT":-360,"GAMT":-540,"GET":240,"GFT":-180,"GILT":720,"GMT":0,"GST":240,"GYT":-240,"HAA":-180,"HAC":-300,"HADT":-540,"HAE":-240,"HAP":-420,"HAR":-360,"HAST":-600,"HAT":-90,"HAY":-480,"HKT":480,"HLV":-210,"HNA":-240,"HNC":-360,"HNE":-300,"HNP":-480,"HNR":-420,"HNT":-150,"HNY":-540,"HOVT":420,"ICT":420,"IDT":180,"IOT":360,"IRDT":270,"IRKST":540,"IRKT":540,"IRST":210,"IST":60,"JST":540,"KGT":360,"KRAST":480,"KRAT":480,"KST":540,"KUYT":240,"LHDT":660,"LHST":630,"LINT":840,"MAGST":720,"MAGT":720,"MART":-510,"MAWT":300,"MDT":-360,"MESZ":120,"MEZ":60,"MHT":720,"MMT":390,"MSD":240,"MSK":240,"MST":-420,"MUT":240,"MVT":300,"MYT":480,"NCT":660,"NDT":-90,"NFT":690,"NOVST":420,"NOVT":360,"NPT":345,"NST":-150,"NUT":-660,"NZDT":780,"NZST":720,"OMSST":420,"OMST":420,"PDT":-420,"PET":-300,"PETST":720,"PETT":720,"PGT":600,"PHOT":780,"PHT":480,"PKT":300,"PMDT":-120,"PMST":-180,"PONT":660,"PST":-480,"PT":-480,"PWT":540,"PYST":-180,"PYT":-240,"RET":240,"SAMT":240,"SAST":120,"SBT":660,"SCT":240,"SGT":480,"SRT":-180,"SST":-660,"TAHT":-600,"TFT":300,"TJT":300,"TKT":780,"TLT":540,"TMT":300,"TVT":720,"ULAT":480,"UTC":0,"UYST":-120,"UYT":-180,"UZT":300,"VET":-210,"VLAST":660,"VLAT":660,"VUT":660,"WAST":120,"WAT":60,"WEST":60,"WESZ":60,"WET":0,"WEZ":0,"WFT":720,"WGST":-120,"WGT":-180,"WIB":420,"WIT":540,"WITA":480,"WST":780,"WT":0,"YAKST":600,"YAKT":600,"YAPT":600,"YEKST":360,"YEKT":360}
+},{"./refiner":34}],30:[function(require,module,exports){
+/*
+  
+*/
+var Refiner = require('./refiner').Refiner;
+
+
+var TIMEZONE_OFFSET_PATTERN = new RegExp("^\\s*(GMT|UTC)?(\\+|\\-)(\\d{1,2}):?(\\d{2})", 'i');
+var TIMEZONE_OFFSET_SIGN_GROUP = 2;
+var TIMEZONE_OFFSET_HOUR_OFFSET_GROUP = 3;
+var TIMEZONE_OFFSET_MINUTE_OFFSET_GROUP = 4;
+
+exports.Refiner = function ExtractTimezoneOffsetRefiner() {
+    Refiner.call(this);
+
+    this.refine = function(text, results, opt) {
+
+        results.forEach(function(result) {
+
+            if (result.start.isCertain('timezoneOffset')) {
+                return;
+            }
+
+            var match = TIMEZONE_OFFSET_PATTERN.exec(text.substring(result.index + result.text.length));
+            if (!match) {
+                return;
+            }
+
+            var hourOffset = parseInt(match[TIMEZONE_OFFSET_HOUR_OFFSET_GROUP]);
+            var minuteOffset = parseInt(match[TIMEZONE_OFFSET_MINUTE_OFFSET_GROUP]);
+            var timezoneOffset = hourOffset * 60 + minuteOffset;
+            if (match[TIMEZONE_OFFSET_SIGN_GROUP] === '-') {
+                timezoneOffset = -timezoneOffset;
+            }
+
+            if (result.end != null) {
+                result.end.assign('timezoneOffset', timezoneOffset);
+            }
+
+            result.start.assign('timezoneOffset', timezoneOffset);
+            result.text += match[0];
+            result.tags['ExtractTimezoneOffsetRefiner'] = true;
+        });
+
+        return results;
+    }
+}
+
+},{"./refiner":34}],31:[function(require,module,exports){
+/*
+  
+*/
+var ENMergeDateRangeRefiner = require('../EN/ENMergeDateRangeRefiner').Refiner;
+
+exports.Refiner = function JPMergeDateRangeRefiner() {
+    ENMergeDateRangeRefiner.call(this);
+
+    this.pattern = function () { return /^\s*(から|ー)\s*$/i };
+}
+
+
+},{"../EN/ENMergeDateRangeRefiner":27}],32:[function(require,module,exports){
+/*
+  
+*/
+var Refiner = require('./refiner').Refiner;
+
+exports.Refiner = function OverlapRemovalRefiner() {
+	Refiner.call(this);
+	
+
+	this.refine = function(text, results, opt) { 
+
+        if (results.length < 2) return results;
+        
+        var filteredResults = [];
+        var prevResult = results[0];
+        
+        for (var i=1; i<results.length; i++){
+            
+            var result = results[i];
+            
+            // If overlap, compare the length and discard the shorter one
+            if (result.index < prevResult.index + prevResult.text.length) {
+
+                if (result.text.length > prevResult.text.length){
+                    prevResult = result;
+                }
+                
+            } else {
+                filteredResults.push(prevResult);
+                prevResult = result;
+            }
+        }
+        
+        // The last one
+        if (prevResult != null) {
+            filteredResults.push(prevResult);
+        }
+
+        return filteredResults;
+    }
+}
+},{"./refiner":34}],33:[function(require,module,exports){
+/*
+  
+*/
+var Filter = require('./refiner').Filter;
+
+exports.Refiner = function UnlikelyFormatFilter() {
+    Filter.call(this);
+    
+
+    this.isValid = function(text, result, opt) { 
+
+        if (result.text.replace(' ','').match(/^\d*(\.\d*)?$/)) {
+            return false;
+        }
+
+        return true; 
+    }
+}
+},{"./refiner":34}],34:[function(require,module,exports){
+
+exports.Refiner = function Refiner() { 
+
+    this.refine = function(text, results, opt) { return results; };
+}
+
+exports.Filter = function Filter() { 
+    
+    exports.Refiner.call(this);
+
+    this.isValid = function(text, result, opt) { return true; }
+    this.refine = function(text, results, opt) { 
+
+        var filteredResult = [];
+        for (var i=0; i < results.length; i++) {
+
+            var result = results[i];
+            if (this.isValid(text, result, opt)) {
+                filteredResult.push(result);
+            }
+        }
+
+        return filteredResult;
+    }
+}
+
+
+// Common refiners
+exports.OverlapRemovalRefiner = require('./OverlapRemovalRefiner').Refiner;
+exports.ExtractTimezoneOffsetRefiner = require('./ExtractTimezoneOffsetRefiner').Refiner;
+exports.ExtractTimezoneAbbrRefiner = require('./ExtractTimezoneAbbrRefiner').Refiner;
+exports.UnlikelyFormatFilter = require('./UnlikelyFormatFilter').Refiner;
+
+// EN refiners
+exports.ENMergeDateTimeRefiner = require('./EN/ENMergeDateTimeRefiner').Refiner;
+exports.ENMergeDateRangeRefiner = require('./EN/ENMergeDateRangeRefiner').Refiner;
+
+// JP refiners
+exports.JPMergeDateRangeRefiner = require('./JP/JPMergeDateRangeRefiner').Refiner;
+
+
+},{"./EN/ENMergeDateRangeRefiner":27,"./EN/ENMergeDateTimeRefiner":28,"./ExtractTimezoneAbbrRefiner":29,"./ExtractTimezoneOffsetRefiner":30,"./JP/JPMergeDateRangeRefiner":31,"./OverlapRemovalRefiner":32,"./UnlikelyFormatFilter":33}],35:[function(require,module,exports){
+var moment = require('moment');
+
+function ParsedResult(result){
+    result = result || {};
+
+    this.ref   = result.ref;
+    this.index = result.index;
+    this.text  = result.text;
+    this.tags  = result.tags || {};
+
+    this.start = new ParsedComponents(result.start, result.ref)
+    if(result.end){
+        this.end = new ParsedComponents(result.end, result.ref)
+    }
+}
+
+ParsedResult.prototype.clone = function() {
+    var result = new ParsedResult(this);
+    result.tags = JSON.parse(JSON.stringify(this.tags));
+    result.start = this.start.clone();
+    if (this.end) {
+        result.end = this.end.clone();
+    }
+}
+
+ParsedResult.prototype.hasPossibleDates = function() {
+    return this.start.isPossibleDate() && (!this.end || this.end.isPossibleDate());
+}
+
+
+function ParsedComponents (components, ref){
+
+    this.knownValues = {};
+    this.impliedValues = {};
+
+    if (components) {
+        for (key in components) {
+            this.knownValues[key] = components[key];
+        }
+    }
+
+    if (ref) {
+        ref = moment(ref);
+        this.imply('day', ref.date())
+        this.imply('month', ref.month() + 1)
+        this.imply('year', ref.year())
+    }
+    
+
+    this.imply('hour', 12);
+    this.imply('minute', 0);
+    this.imply('second', 0);
+    this.imply('millisecond', 0);
+}
+
+ParsedComponents.prototype.clone = function () {
+    var component = new ParsedComponents();
+    component.knownValues = JSON.parse(JSON.stringify(this.knownValues));
+    component.impliedValues = JSON.parse(JSON.stringify(this.impliedValues));
+    return component;
+};
+
+ParsedComponents.prototype.get = function(component, value) {
+    if (component in this.knownValues) return this.knownValues[component];
+    if (component in this.impliedValues) return this.impliedValues[component];
+};
+
+ParsedComponents.prototype.assign = function(component, value) {
+    this.knownValues[component] = value;
+    delete this.impliedValues[component];
+};
+
+ParsedComponents.prototype.imply = function(component, value) {
+    if (component in this.knownValues) return;
+    this.impliedValues[component] = value;
+};
+
+ParsedComponents.prototype.isCertain = function(component) {
+    return component in this.knownValues;
+};
+
+ParsedComponents.prototype.isPossibleDate = function() {
+    
+    var dateMoment = this.moment();
+
+    if (dateMoment.get('year') != this.get('year')) return false;
+    if (dateMoment.get('month') != this.get('month')-1) return false;
+    if (dateMoment.get('date') != this.get('day')) return false;
+    if (dateMoment.get('hour') != this.get('hour')) return false;
+    if (dateMoment.get('minute') != this.get('minute')) return false;
+
+    return true;
+}
+
+ParsedComponents.prototype.date = function() {
+    var dateMoment = this.moment();
+    return dateMoment.toDate();
+};
+
+ParsedComponents.prototype.moment = function() {
+    var dateMoment = moment();
+
+    dateMoment.set('year', this.get('year'));
+    dateMoment.set('month', this.get('month')-1);
+    dateMoment.set('date', this.get('day'));
+    dateMoment.set('hour', this.get('hour'));
+    dateMoment.set('minute', this.get('minute'));
+    dateMoment.set('second', this.get('second'));
+    dateMoment.set('millisecond', this.get('millisecond'));
+
+    // Javascript Date Object return minus timezone offset
+    var currentTimezoneOffset = dateMoment.utcOffset();
+    var targetTimezoneOffset = this.isCertain('timezoneOffset') ? 
+        this.get('timezoneOffset') : currentTimezoneOffset;
+
+    var adjustTimezoneOffset = targetTimezoneOffset - currentTimezoneOffset;
+    dateMoment.add(-adjustTimezoneOffset, 'minutes');
+
+    return dateMoment;
+}
+
+
+
+exports.ParsedComponents = ParsedComponents;
+exports.ParsedResult = ParsedResult;
+
+},{"moment":267}],36:[function(require,module,exports){
+exports.WEEKDAY_OFFSET = { 
+    'sunday': 0, 
+    'sun': 0, 
+    'monday': 1, 
+    'mon': 1,
+    'tuesday': 2, 
+    'tue':2, 
+    'wednesday': 3, 
+    'wed': 3, 
+    'thursday': 4, 
+    'thur': 4, 
+    'thu': 4,
+    'friday': 5, 
+    'fri': 5,
+    'saturday': 6, 
+    'sat': 6,}
+    
+exports.MONTH_OFFSET = { 
+    'january': 1,
+    'jan': 1,
+    'jan.': 1,
+    'february': 2,
+    'feb': 2,
+    'feb.': 2,
+    'march': 3,
+    'mar': 3,
+    'mar.': 3,
+    'april': 4,
+    'apr': 4,
+    'apr.': 4,
+    'may': 5,
+    'june': 6,
+    'jun': 6,
+    'jun.': 6,
+    'july': 7,
+    'jul': 7,
+    'jul.': 7,
+    'august': 8,
+    'aug': 8,
+    'aug.': 8,
+    'september': 9,
+    'sep': 9,
+    'sep.': 9,
+    'sept': 9,
+    'sept.': 9,
+    'october': 10,
+    'oct': 10,
+    'oct.': 10,
+    'november': 11,
+    'nov': 11,
+    'nov.': 11,
+    'december': 12,
+    'dec': 12,
+    'dec.': 12,
+}
+},{}],37:[function(require,module,exports){
+exports.WEEKDAY_OFFSET = {
+    'domingo': 0,
+    'dom': 0,
+    'lunes': 1,
+    'lun': 1,
+    'martes': 2,
+    'mar':2,
+    'miércoles': 3,
+    'miercoles': 3,
+    'mie': 3,
+    'jueves': 4,
+    'jue': 4,
+    'viernes': 5,
+    'vie': 5,
+    'sábado': 6,
+    'sabado': 6,
+    'sab': 6,}
+
+exports.MONTH_OFFSET = {
+    'enero': 1,
+    'ene': 1,
+    'ene.': 1,
+    'febrero': 2,
+    'feb': 2,
+    'feb.': 2,
+    'marzo': 3,
+    'mar': 3,
+    'mar.': 3,
+    'abril': 4,
+    'abr': 4,
+    'abr.': 4,
+    'mayo': 5,
+    'may': 5,
+    'may.': 5,
+    'junio': 6,
+    'jun': 6,
+    'jun.': 6,
+    'julio': 7,
+    'jul': 7,
+    'jul.': 7,
+    'agosto': 8,
+    'ago': 8,
+    'ago.': 8,
+    'septiembre': 9,
+    'sep': 9,
+    'sept': 9,
+    'sep.': 9,
+    'sept.': 9,
+    'octubre': 10,
+    'oct': 10,
+    'oct.': 10,
+    'noviembre': 11,
+    'nov': 11,
+    'nov.': 11,
+    'diciembre': 12,
+    'dic': 12,
+    'dic.': 12,
+}
+
+},{}],38:[function(require,module,exports){
+
+
+/**
+ * to-hankaku.js
+ * convert to ascii code strings.
+ *
+ * @version 1.0.1
+ * @author think49
+ * @url https://gist.github.com/964592
+ * @license http://www.opensource.org/licenses/mit-license.php (The MIT License)
+ */
+ 
+exports.toHankaku = (function (String, fromCharCode) {
+ 
+    function toHankaku (string) {
+        return String(string).replace(/\u2019/g, '\u0027').replace(/\u201D/g, '\u0022').replace(/\u3000/g, '\u0020').replace(/\uFFE5/g, '\u00A5').replace(/[\uFF01\uFF03-\uFF06\uFF08\uFF09\uFF0C-\uFF19\uFF1C-\uFF1F\uFF21-\uFF3B\uFF3D\uFF3F\uFF41-\uFF5B\uFF5D\uFF5E]/g, alphaNum);
+    }
+ 
+    function alphaNum (token) {
+        return fromCharCode(token.charCodeAt(0) - 65248);
+    }
+ 
+    return toHankaku;
+})(String, String.fromCharCode);
+
+/**
+ * to-zenkaku.js
+ * convert to multi byte strings.
+ *
+ * @version 1.0.2
+ * @author think49
+ * @url https://gist.github.com/964592
+ * @license http://www.opensource.org/licenses/mit-license.php (The MIT License)
+ */
+exports.toZenkaku = (function (String, fromCharCode) {
+ 
+    function toZenkaku (string) {
+        return String(string).replace(/\u0020/g, '\u3000').replace(/\u0022/g, '\u201D').replace(/\u0027/g, '\u2019').replace(/\u00A5/g, '\uFFE5').replace(/[!#-&(),-9\u003C-?A-[\u005D_a-{}~]/g, alphaNum);
+    }
+ 
+    function alphaNum (token) {
+        return fromCharCode(token.charCodeAt(0) + 65248);
+    }
+ 
+    return toZenkaku;
+})(String, String.fromCharCode);
+},{}],39:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -17453,7 +20640,7 @@ var CSSCore = {
 
 module.exports = CSSCore;
 }).call(this,require('_process'))
-},{"./invariant":19,"_process":232}],4:[function(require,module,exports){
+},{"./invariant":55,"_process":268}],40:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -17540,7 +20727,7 @@ var EventListener = {
 
 module.exports = EventListener;
 }).call(this,require('_process'))
-},{"./emptyFunction":11,"_process":232}],5:[function(require,module,exports){
+},{"./emptyFunction":47,"_process":268}],41:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17577,7 +20764,7 @@ var ExecutionEnvironment = {
 };
 
 module.exports = ExecutionEnvironment;
-},{}],6:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17610,7 +20797,7 @@ function camelize(string) {
 }
 
 module.exports = camelize;
-},{}],7:[function(require,module,exports){
+},{}],43:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17651,7 +20838,7 @@ function camelizeStyleName(string) {
 }
 
 module.exports = camelizeStyleName;
-},{"./camelize":6}],8:[function(require,module,exports){
+},{"./camelize":42}],44:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17707,7 +20894,7 @@ function containsNode(_x, _x2) {
 }
 
 module.exports = containsNode;
-},{"./isTextNode":21}],9:[function(require,module,exports){
+},{"./isTextNode":57}],45:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17793,7 +20980,7 @@ function createArrayFromMixed(obj) {
 }
 
 module.exports = createArrayFromMixed;
-},{"./toArray":29}],10:[function(require,module,exports){
+},{"./toArray":65}],46:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -17880,7 +21067,7 @@ function createNodesFromMarkup(markup, handleScript) {
 
 module.exports = createNodesFromMarkup;
 }).call(this,require('_process'))
-},{"./ExecutionEnvironment":5,"./createArrayFromMixed":9,"./getMarkupWrap":15,"./invariant":19,"_process":232}],11:[function(require,module,exports){
+},{"./ExecutionEnvironment":41,"./createArrayFromMixed":45,"./getMarkupWrap":51,"./invariant":55,"_process":268}],47:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17919,7 +21106,7 @@ emptyFunction.thatReturnsArgument = function (arg) {
 };
 
 module.exports = emptyFunction;
-},{}],12:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -17942,7 +21129,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = emptyObject;
 }).call(this,require('_process'))
-},{"_process":232}],13:[function(require,module,exports){
+},{"_process":268}],49:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -17969,7 +21156,7 @@ function focusNode(node) {
 }
 
 module.exports = focusNode;
-},{}],14:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18003,7 +21190,7 @@ function getActiveElement() /*?DOMElement*/{
 }
 
 module.exports = getActiveElement;
-},{}],15:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -18101,7 +21288,7 @@ function getMarkupWrap(nodeName) {
 
 module.exports = getMarkupWrap;
 }).call(this,require('_process'))
-},{"./ExecutionEnvironment":5,"./invariant":19,"_process":232}],16:[function(require,module,exports){
+},{"./ExecutionEnvironment":41,"./invariant":55,"_process":268}],52:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18140,7 +21327,7 @@ function getUnboundedScrollPosition(scrollable) {
 }
 
 module.exports = getUnboundedScrollPosition;
-},{}],17:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18174,7 +21361,7 @@ function hyphenate(string) {
 }
 
 module.exports = hyphenate;
-},{}],18:[function(require,module,exports){
+},{}],54:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18214,7 +21401,7 @@ function hyphenateStyleName(string) {
 }
 
 module.exports = hyphenateStyleName;
-},{"./hyphenate":17}],19:[function(require,module,exports){
+},{"./hyphenate":53}],55:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -18266,7 +21453,7 @@ var invariant = function (condition, format, a, b, c, d, e, f) {
 
 module.exports = invariant;
 }).call(this,require('_process'))
-},{"_process":232}],20:[function(require,module,exports){
+},{"_process":268}],56:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18290,7 +21477,7 @@ function isNode(object) {
 }
 
 module.exports = isNode;
-},{}],21:[function(require,module,exports){
+},{}],57:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18316,7 +21503,7 @@ function isTextNode(object) {
 }
 
 module.exports = isTextNode;
-},{"./isNode":20}],22:[function(require,module,exports){
+},{"./isNode":56}],58:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -18367,7 +21554,7 @@ var keyMirror = function (obj) {
 
 module.exports = keyMirror;
 }).call(this,require('_process'))
-},{"./invariant":19,"_process":232}],23:[function(require,module,exports){
+},{"./invariant":55,"_process":268}],59:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18403,7 +21590,7 @@ var keyOf = function (oneKeyObj) {
 };
 
 module.exports = keyOf;
-},{}],24:[function(require,module,exports){
+},{}],60:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18455,7 +21642,7 @@ function mapObject(object, callback, context) {
 }
 
 module.exports = mapObject;
-},{}],25:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18487,7 +21674,7 @@ function memoizeStringOnly(callback) {
 }
 
 module.exports = memoizeStringOnly;
-},{}],26:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18511,7 +21698,7 @@ if (ExecutionEnvironment.canUseDOM) {
 }
 
 module.exports = performance || {};
-},{"./ExecutionEnvironment":5}],27:[function(require,module,exports){
+},{"./ExecutionEnvironment":41}],63:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18541,7 +21728,7 @@ if (!curPerformance || !curPerformance.now) {
 var performanceNow = curPerformance.now.bind(curPerformance);
 
 module.exports = performanceNow;
-},{"./performance":26}],28:[function(require,module,exports){
+},{"./performance":62}],64:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -18592,7 +21779,7 @@ function shallowEqual(objA, objB) {
 }
 
 module.exports = shallowEqual;
-},{}],29:[function(require,module,exports){
+},{}],65:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -18652,7 +21839,7 @@ function toArray(obj) {
 
 module.exports = toArray;
 }).call(this,require('_process'))
-},{"./invariant":19,"_process":232}],30:[function(require,module,exports){
+},{"./invariant":55,"_process":268}],66:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -18712,7 +21899,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = warning;
 }).call(this,require('_process'))
-},{"./emptyFunction":11,"_process":232}],31:[function(require,module,exports){
+},{"./emptyFunction":47,"_process":268}],67:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -18749,7 +21936,7 @@ var _pluginsFlexboxOld2 = _interopRequireDefault(_pluginsFlexboxOld);
 
 exports['default'] = [_pluginsCursor2['default'], _pluginsFlex2['default'], _pluginsSizing2['default'], _pluginsGradient2['default'], _pluginsFlexboxIE2['default'], _pluginsFlexboxOld2['default']];
 module.exports = exports['default'];
-},{"./plugins/cursor":36,"./plugins/flex":37,"./plugins/flexboxIE":38,"./plugins/flexboxOld":39,"./plugins/gradient":40,"./plugins/sizing":41}],32:[function(require,module,exports){
+},{"./plugins/cursor":72,"./plugins/flex":73,"./plugins/flexboxIE":74,"./plugins/flexboxOld":75,"./plugins/gradient":76,"./plugins/sizing":77}],68:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -18946,9 +22133,9 @@ var Prefixer = (function () {
 exports['default'] = Prefixer;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./Plugins":31,"./caniuseData":33,"./getBrowserInformation":34,"./getPrefixedKeyframes":35,"_process":232}],33:[function(require,module,exports){
+},{"./Plugins":67,"./caniuseData":69,"./getBrowserInformation":70,"./getPrefixedKeyframes":71,"_process":268}],69:[function(require,module,exports){
 var caniuseData = {"chrome":{"transform":35,"transformOrigin":35,"transformOriginX":35,"transformOriginY":35,"backfaceVisibility":35,"perspective":35,"perspectiveOrigin":35,"transformStyle":35,"transformOriginZ":35,"animation":42,"animationDelay":42,"animationDirection":42,"animationFillMode":42,"animationDuration":42,"animationIterationCount":42,"animationName":42,"animationPlayState":42,"animationTimingFunction":42,"appearance":49,"userSelect":49,"fontKerning":32,"textEmphasisPosition":49,"textEmphasis":49,"textEmphasisStyle":49,"textEmphasisColor":49,"boxDecorationBreak":49,"clipPath":49,"maskImage":49,"maskMode":49,"maskRepeat":49,"maskPosition":49,"maskClip":49,"maskOrigin":49,"maskSize":49,"maskComposite":49,"mask":49,"maskBorderSource":49,"maskBorderMode":49,"maskBorderSlice":49,"maskBorderWidth":49,"maskBorderOutset":49,"maskBorderRepeat":49,"maskBorder":49,"maskType":49,"textDecorationStyle":49,"textDecorationSkip":49,"textDecorationLine":49,"textDecorationColor":49,"filter":49,"fontFeatureSettings":49,"breakAfter":49,"breakBefore":49,"breakInside":49,"columnCount":49,"columnFill":49,"columnGap":49,"columnRule":49,"columnRuleColor":49,"columnRuleStyle":49,"columnRuleWidth":49,"columns":49,"columnSpan":49,"columnWidth":49},"safari":{"flex":8,"flexBasis":8,"flexDirection":8,"flexGrow":8,"flexFlow":8,"flexShrink":8,"flexWrap":8,"alignContent":8,"alignItems":8,"alignSelf":8,"justifyContent":8,"order":8,"transition":6,"transitionDelay":6,"transitionDuration":6,"transitionProperty":6,"transitionTimingFunction":6,"transform":8,"transformOrigin":8,"transformOriginX":8,"transformOriginY":8,"backfaceVisibility":8,"perspective":8,"perspectiveOrigin":8,"transformStyle":8,"transformOriginZ":8,"animation":8,"animationDelay":8,"animationDirection":8,"animationFillMode":8,"animationDuration":8,"animationIterationCount":8,"animationName":8,"animationPlayState":8,"animationTimingFunction":8,"appearance":9,"userSelect":9,"backdropFilter":9,"fontKerning":9,"scrollSnapType":9,"scrollSnapPointsX":9,"scrollSnapPointsY":9,"scrollSnapDestination":9,"scrollSnapCoordinate":9,"textEmphasisPosition":7,"textEmphasis":7,"textEmphasisStyle":7,"textEmphasisColor":7,"boxDecorationBreak":9,"clipPath":9,"maskImage":9,"maskMode":9,"maskRepeat":9,"maskPosition":9,"maskClip":9,"maskOrigin":9,"maskSize":9,"maskComposite":9,"mask":9,"maskBorderSource":9,"maskBorderMode":9,"maskBorderSlice":9,"maskBorderWidth":9,"maskBorderOutset":9,"maskBorderRepeat":9,"maskBorder":9,"maskType":9,"textDecorationStyle":9,"textDecorationSkip":9,"textDecorationLine":9,"textDecorationColor":9,"shapeImageThreshold":9,"shapeImageMargin":9,"shapeImageOutside":9,"filter":9,"hyphens":9,"flowInto":9,"flowFrom":9,"breakBefore":8,"breakAfter":8,"breakInside":8,"regionFragment":9,"columnCount":8,"columnFill":8,"columnGap":8,"columnRule":8,"columnRuleColor":8,"columnRuleStyle":8,"columnRuleWidth":8,"columns":8,"columnSpan":8,"columnWidth":8},"firefox":{"appearance":45,"userSelect":45,"boxSizing":28,"textAlignLast":45,"textDecorationStyle":35,"textDecorationSkip":35,"textDecorationLine":35,"textDecorationColor":35,"tabSize":45,"hyphens":42,"fontFeatureSettings":33,"breakAfter":45,"breakBefore":45,"breakInside":45,"columnCount":45,"columnFill":45,"columnGap":45,"columnRule":45,"columnRuleColor":45,"columnRuleStyle":45,"columnRuleWidth":45,"columns":45,"columnSpan":45,"columnWidth":45},"opera":{"flex":16,"flexBasis":16,"flexDirection":16,"flexGrow":16,"flexFlow":16,"flexShrink":16,"flexWrap":16,"alignContent":16,"alignItems":16,"alignSelf":16,"justifyContent":16,"order":16,"transform":22,"transformOrigin":22,"transformOriginX":22,"transformOriginY":22,"backfaceVisibility":22,"perspective":22,"perspectiveOrigin":22,"transformStyle":22,"transformOriginZ":22,"animation":29,"animationDelay":29,"animationDirection":29,"animationFillMode":29,"animationDuration":29,"animationIterationCount":29,"animationName":29,"animationPlayState":29,"animationTimingFunction":29,"appearance":35,"userSelect":35,"fontKerning":19,"textEmphasisPosition":35,"textEmphasis":35,"textEmphasisStyle":35,"textEmphasisColor":35,"boxDecorationBreak":35,"clipPath":35,"maskImage":35,"maskMode":35,"maskRepeat":35,"maskPosition":35,"maskClip":35,"maskOrigin":35,"maskSize":35,"maskComposite":35,"mask":35,"maskBorderSource":35,"maskBorderMode":35,"maskBorderSlice":35,"maskBorderWidth":35,"maskBorderOutset":35,"maskBorderRepeat":35,"maskBorder":35,"maskType":35,"filter":35,"fontFeatureSettings":35,"breakAfter":35,"breakBefore":35,"breakInside":35,"columnCount":35,"columnFill":35,"columnGap":35,"columnRule":35,"columnRuleColor":35,"columnRuleStyle":35,"columnRuleWidth":35,"columns":35,"columnSpan":35,"columnWidth":35},"ie":{"gridTemplateRows":11,"grid":11,"flowInto":11,"flexDirection":10,"touchAction":10,"gridRow":11,"scrollSnapPointsX":11,"wrapMargin":11,"breakBefore":11,"gridRowEnd":11,"gridRowStart":11,"breakInside":11,"transformOrigin":9,"scrollSnapType":11,"scrollSnapDestination":11,"gridTemplate":11,"flexWrap":10,"transformOriginX":9,"flowFrom":11,"gridColumnStart":11,"userSelect":11,"wrapFlow":11,"scrollSnapCoordinate":11,"gridGap":11,"gridAutoRows":11,"hyphens":11,"regionFragment":11,"flex":10,"columnGap":11,"wrapThrough":11,"transformOriginY":9,"breakAfter":11,"rowGap":11,"gridTemplateColumns":11,"gridArea":11,"transform":9,"gridAutoFlow":11,"flexFlow":10,"gridTemplateAreas":11,"gridColumn":11,"gridAutoColumns":11,"scrollSnapPointsY":11,"textSizeAdjust":11},"ios_saf":{"flex":8.1,"flexBasis":8.1,"flexDirection":8.1,"flexGrow":8.1,"flexFlow":8.1,"flexShrink":8.1,"flexWrap":8.1,"alignContent":8.1,"alignItems":8.1,"alignSelf":8.1,"justifyContent":8.1,"order":8.1,"transition":6,"transitionDelay":6,"transitionDuration":6,"transitionProperty":6,"transitionTimingFunction":6,"transform":8.1,"transformOrigin":8.1,"transformOriginX":8.1,"transformOriginY":8.1,"backfaceVisibility":8.1,"perspective":8.1,"perspectiveOrigin":8.1,"transformStyle":8.1,"transformOriginZ":8.1,"animation":8.1,"animationDelay":8.1,"animationDirection":8.1,"animationFillMode":8.1,"animationDuration":8.1,"animationIterationCount":8.1,"animationName":8.1,"animationPlayState":8.1,"animationTimingFunction":8.1,"appearance":9,"userSelect":9,"backdropFilter":9,"fontKerning":9,"scrollSnapType":9,"scrollSnapPointsX":9,"scrollSnapPointsY":9,"scrollSnapDestination":9,"scrollSnapCoordinate":9,"boxDecorationBreak":9,"clipPath":9,"maskImage":9,"maskMode":9,"maskRepeat":9,"maskPosition":9,"maskClip":9,"maskOrigin":9,"maskSize":9,"maskComposite":9,"mask":9,"maskBorderSource":9,"maskBorderMode":9,"maskBorderSlice":9,"maskBorderWidth":9,"maskBorderOutset":9,"maskBorderRepeat":9,"maskBorder":9,"maskType":9,"textSizeAdjust":9,"textDecorationStyle":9,"textDecorationSkip":9,"textDecorationLine":9,"textDecorationColor":9,"shapeImageThreshold":9,"shapeImageMargin":9,"shapeImageOutside":9,"filter":9,"hyphens":9,"flowInto":9,"flowFrom":9,"breakBefore":8.1,"breakAfter":8.1,"breakInside":8.1,"regionFragment":9,"columnCount":8.1,"columnFill":8.1,"columnGap":8.1,"columnRule":8.1,"columnRuleColor":8.1,"columnRuleStyle":8.1,"columnRuleWidth":8.1,"columns":8.1,"columnSpan":8.1,"columnWidth":8.1},"android":{"borderImage":4.2,"borderImageOutset":4.2,"borderImageRepeat":4.2,"borderImageSlice":4.2,"borderImageSource":4.2,"borderImageWidth":4.2,"flex":4.2,"flexBasis":4.2,"flexDirection":4.2,"flexGrow":4.2,"flexFlow":4.2,"flexShrink":4.2,"flexWrap":4.2,"alignContent":4.2,"alignItems":4.2,"alignSelf":4.2,"justifyContent":4.2,"order":4.2,"transition":4.2,"transitionDelay":4.2,"transitionDuration":4.2,"transitionProperty":4.2,"transitionTimingFunction":4.2,"transform":4.4,"transformOrigin":4.4,"transformOriginX":4.4,"transformOriginY":4.4,"backfaceVisibility":4.4,"perspective":4.4,"perspectiveOrigin":4.4,"transformStyle":4.4,"transformOriginZ":4.4,"animation":4.4,"animationDelay":4.4,"animationDirection":4.4,"animationFillMode":4.4,"animationDuration":4.4,"animationIterationCount":4.4,"animationName":4.4,"animationPlayState":4.4,"animationTimingFunction":4.4,"appearance":44,"userSelect":44,"fontKerning":4.4,"textEmphasisPosition":44,"textEmphasis":44,"textEmphasisStyle":44,"textEmphasisColor":44,"boxDecorationBreak":44,"clipPath":44,"maskImage":44,"maskMode":44,"maskRepeat":44,"maskPosition":44,"maskClip":44,"maskOrigin":44,"maskSize":44,"maskComposite":44,"mask":44,"maskBorderSource":44,"maskBorderMode":44,"maskBorderSlice":44,"maskBorderWidth":44,"maskBorderOutset":44,"maskBorderRepeat":44,"maskBorder":44,"maskType":44,"filter":44,"fontFeatureSettings":44,"breakAfter":44,"breakBefore":44,"breakInside":44,"columnCount":44,"columnFill":44,"columnGap":44,"columnRule":44,"columnRuleColor":44,"columnRuleStyle":44,"columnRuleWidth":44,"columns":44,"columnSpan":44,"columnWidth":44},"and_chr":{"appearance":46,"userSelect":46,"textEmphasisPosition":46,"textEmphasis":46,"textEmphasisStyle":46,"textEmphasisColor":46,"boxDecorationBreak":46,"clipPath":46,"maskImage":46,"maskMode":46,"maskRepeat":46,"maskPosition":46,"maskClip":46,"maskOrigin":46,"maskSize":46,"maskComposite":46,"mask":46,"maskBorderSource":46,"maskBorderMode":46,"maskBorderSlice":46,"maskBorderWidth":46,"maskBorderOutset":46,"maskBorderRepeat":46,"maskBorder":46,"maskType":46,"textDecorationStyle":46,"textDecorationSkip":46,"textDecorationLine":46,"textDecorationColor":46,"filter":46,"fontFeatureSettings":46,"breakAfter":46,"breakBefore":46,"breakInside":46,"columnCount":46,"columnFill":46,"columnGap":46,"columnRule":46,"columnRuleColor":46,"columnRuleStyle":46,"columnRuleWidth":46,"columns":46,"columnSpan":46,"columnWidth":46},"and_uc":{"flex":9.9,"flexBasis":9.9,"flexDirection":9.9,"flexGrow":9.9,"flexFlow":9.9,"flexShrink":9.9,"flexWrap":9.9,"alignContent":9.9,"alignItems":9.9,"alignSelf":9.9,"justifyContent":9.9,"order":9.9,"transition":9.9,"transitionDelay":9.9,"transitionDuration":9.9,"transitionProperty":9.9,"transitionTimingFunction":9.9,"transform":9.9,"transformOrigin":9.9,"transformOriginX":9.9,"transformOriginY":9.9,"backfaceVisibility":9.9,"perspective":9.9,"perspectiveOrigin":9.9,"transformStyle":9.9,"transformOriginZ":9.9,"animation":9.9,"animationDelay":9.9,"animationDirection":9.9,"animationFillMode":9.9,"animationDuration":9.9,"animationIterationCount":9.9,"animationName":9.9,"animationPlayState":9.9,"animationTimingFunction":9.9,"appearance":9.9,"userSelect":9.9,"fontKerning":9.9,"textEmphasisPosition":9.9,"textEmphasis":9.9,"textEmphasisStyle":9.9,"textEmphasisColor":9.9,"maskImage":9.9,"maskMode":9.9,"maskRepeat":9.9,"maskPosition":9.9,"maskClip":9.9,"maskOrigin":9.9,"maskSize":9.9,"maskComposite":9.9,"mask":9.9,"maskBorderSource":9.9,"maskBorderMode":9.9,"maskBorderSlice":9.9,"maskBorderWidth":9.9,"maskBorderOutset":9.9,"maskBorderRepeat":9.9,"maskBorder":9.9,"maskType":9.9,"textSizeAdjust":9.9,"filter":9.9,"hyphens":9.9,"flowInto":9.9,"flowFrom":9.9,"breakBefore":9.9,"breakAfter":9.9,"breakInside":9.9,"regionFragment":9.9,"fontFeatureSettings":9.9,"columnCount":9.9,"columnFill":9.9,"columnGap":9.9,"columnRule":9.9,"columnRuleColor":9.9,"columnRuleStyle":9.9,"columnRuleWidth":9.9,"columns":9.9,"columnSpan":9.9,"columnWidth":9.9},"op_mini":{"borderImage":5,"borderImageOutset":5,"borderImageRepeat":5,"borderImageSlice":5,"borderImageSource":5,"borderImageWidth":5,"tabSize":5,"objectFit":5,"objectPosition":5}}; module.exports = caniuseData
-},{}],34:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19153,7 +22340,7 @@ exports['default'] = function (userAgent) {
 };
 
 module.exports = exports['default'];
-},{"bowser":2}],35:[function(require,module,exports){
+},{"bowser":2}],71:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19173,7 +22360,7 @@ exports['default'] = function (_ref) {
 };
 
 module.exports = exports['default'];
-},{}],36:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19195,7 +22382,7 @@ exports['default'] = function (property, value, _ref2) {
 };
 
 module.exports = exports['default'];
-},{}],37:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19217,7 +22404,7 @@ exports['default'] = function (property, value, _ref2) {
 };
 
 module.exports = exports['default'];
-},{}],38:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19259,7 +22446,7 @@ exports['default'] = function (property, value, _ref2, styles) {
 };
 
 module.exports = exports['default'];
-},{}],39:[function(require,module,exports){
+},{}],75:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19307,7 +22494,7 @@ exports['default'] = function (property, value, _ref2) {
 };
 
 module.exports = exports['default'];
-},{}],40:[function(require,module,exports){
+},{}],76:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19330,7 +22517,7 @@ exports['default'] = function (property, value, _ref2) {
 };
 
 module.exports = exports['default'];
-},{}],41:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -19355,7 +22542,7 @@ exports['default'] = function (property, value, _ref2) {
 };
 
 module.exports = exports['default'];
-},{}],42:[function(require,module,exports){
+},{}],78:[function(require,module,exports){
 var jQuery = require('jquery');
 
 /*!
@@ -19679,7 +22866,7 @@ $.extend( $.ui, {
 
 })( jQuery );
 
-},{"jquery":46}],43:[function(require,module,exports){
+},{"jquery":82}],79:[function(require,module,exports){
 var jQuery = require('jquery');
 require('./widget');
 
@@ -19853,7 +23040,7 @@ $.widget("ui.mouse", {
 
 })(jQuery);
 
-},{"./widget":45,"jquery":46}],44:[function(require,module,exports){
+},{"./widget":81,"jquery":82}],80:[function(require,module,exports){
 var jQuery = require('jquery');
 require('./core');
 require('./mouse');
@@ -21149,7 +24336,7 @@ $.widget("ui.sortable", $.ui.mouse, {
 
 })(jQuery);
 
-},{"./core":42,"./mouse":43,"./widget":45,"jquery":46}],45:[function(require,module,exports){
+},{"./core":78,"./mouse":79,"./widget":81,"jquery":82}],81:[function(require,module,exports){
 var jQuery = require('jquery');
 
 /*!
@@ -21674,7 +24861,7 @@ $.each( { show: "fadeIn", hide: "fadeOut" }, function( method, defaultEffect ) {
 
 })( jQuery );
 
-},{"jquery":46}],46:[function(require,module,exports){
+},{"jquery":82}],82:[function(require,module,exports){
 /*!
  * jQuery JavaScript Library v2.1.4
  * http://jquery.com/
@@ -30886,7 +34073,7 @@ return jQuery;
 
 }));
 
-},{}],47:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 /**
  * lodash 3.0.0 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -30917,7 +34104,7 @@ function arrayCopy(source, array) {
 
 module.exports = arrayCopy;
 
-},{}],48:[function(require,module,exports){
+},{}],84:[function(require,module,exports){
 /**
  * lodash 3.0.0 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -30950,7 +34137,7 @@ function arrayEach(array, iteratee) {
 
 module.exports = arrayEach;
 
-},{}],49:[function(require,module,exports){
+},{}],85:[function(require,module,exports){
 /**
  * lodash 3.0.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -30984,7 +34171,7 @@ function baseCopy(source, props, object) {
 
 module.exports = baseCopy;
 
-},{}],50:[function(require,module,exports){
+},{}],86:[function(require,module,exports){
 /**
  * lodash 3.0.2 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31072,7 +34259,7 @@ function isObject(value) {
 
 module.exports = baseFor;
 
-},{}],51:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 /**
  * lodash 3.0.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31139,7 +34326,7 @@ function identity(value) {
 
 module.exports = bindCallback;
 
-},{}],52:[function(require,module,exports){
+},{}],88:[function(require,module,exports){
 /**
  * lodash 3.1.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31193,7 +34380,7 @@ function createAssigner(assigner) {
 
 module.exports = createAssigner;
 
-},{"lodash._bindcallback":51,"lodash._isiterateecall":54,"lodash.restparam":63}],53:[function(require,module,exports){
+},{"lodash._bindcallback":87,"lodash._isiterateecall":90,"lodash.restparam":99}],89:[function(require,module,exports){
 /**
  * lodash 3.9.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31332,7 +34519,7 @@ function isNative(value) {
 
 module.exports = getNative;
 
-},{}],54:[function(require,module,exports){
+},{}],90:[function(require,module,exports){
 /**
  * lodash 3.0.9 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31466,7 +34653,7 @@ function isObject(value) {
 
 module.exports = isIterateeCall;
 
-},{}],55:[function(require,module,exports){
+},{}],91:[function(require,module,exports){
 /**
  * lodash 3.1.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31702,7 +34889,7 @@ function isObject(value) {
 
 module.exports = debounce;
 
-},{"lodash._getnative":53}],56:[function(require,module,exports){
+},{"lodash._getnative":89}],92:[function(require,module,exports){
 /**
  * lodash 3.0.4 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31810,7 +34997,7 @@ function isArguments(value) {
 
 module.exports = isArguments;
 
-},{}],57:[function(require,module,exports){
+},{}],93:[function(require,module,exports){
 /**
  * lodash 3.0.4 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -31992,7 +35179,7 @@ function isNative(value) {
 
 module.exports = isArray;
 
-},{}],58:[function(require,module,exports){
+},{}],94:[function(require,module,exports){
 /**
  * lodash 3.2.0 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32097,7 +35284,7 @@ function isPlainObject(value) {
 
 module.exports = isPlainObject;
 
-},{"lodash._basefor":50,"lodash.isarguments":56,"lodash.keysin":61}],59:[function(require,module,exports){
+},{"lodash._basefor":86,"lodash.isarguments":92,"lodash.keysin":97}],95:[function(require,module,exports){
 /**
  * lodash 3.0.2 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32209,7 +35396,7 @@ function isTypedArray(value) {
 
 module.exports = isTypedArray;
 
-},{}],60:[function(require,module,exports){
+},{}],96:[function(require,module,exports){
 /**
  * lodash 3.1.2 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32447,7 +35634,7 @@ function keysIn(object) {
 
 module.exports = keys;
 
-},{"lodash._getnative":53,"lodash.isarguments":56,"lodash.isarray":57}],61:[function(require,module,exports){
+},{"lodash._getnative":89,"lodash.isarguments":92,"lodash.isarray":93}],97:[function(require,module,exports){
 /**
  * lodash 3.0.8 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32581,7 +35768,7 @@ function keysIn(object) {
 
 module.exports = keysIn;
 
-},{"lodash.isarguments":56,"lodash.isarray":57}],62:[function(require,module,exports){
+},{"lodash.isarguments":92,"lodash.isarray":93}],98:[function(require,module,exports){
 /**
  * lodash 3.3.2 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32849,7 +36036,7 @@ var merge = createAssigner(baseMerge);
 
 module.exports = merge;
 
-},{"lodash._arraycopy":47,"lodash._arrayeach":48,"lodash._createassigner":52,"lodash.isarguments":56,"lodash.isarray":57,"lodash.isplainobject":58,"lodash.istypedarray":59,"lodash.keys":60,"lodash.toplainobject":65}],63:[function(require,module,exports){
+},{"lodash._arraycopy":83,"lodash._arrayeach":84,"lodash._createassigner":88,"lodash.isarguments":92,"lodash.isarray":93,"lodash.isplainobject":94,"lodash.istypedarray":95,"lodash.keys":96,"lodash.toplainobject":101}],99:[function(require,module,exports){
 /**
  * lodash 3.6.1 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -32918,7 +36105,7 @@ function restParam(func, start) {
 
 module.exports = restParam;
 
-},{}],64:[function(require,module,exports){
+},{}],100:[function(require,module,exports){
 /**
  * lodash 3.0.4 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -33016,7 +36203,7 @@ function isObject(value) {
 
 module.exports = throttle;
 
-},{"lodash.debounce":55}],65:[function(require,module,exports){
+},{"lodash.debounce":91}],101:[function(require,module,exports){
 /**
  * lodash 3.0.0 (Custom Build) <https://lodash.com/>
  * Build: `lodash modern modularize exports="npm" -o ./`
@@ -33057,7 +36244,7 @@ function toPlainObject(value) {
 
 module.exports = toPlainObject;
 
-},{"lodash._basecopy":49,"lodash.keysin":61}],66:[function(require,module,exports){
+},{"lodash._basecopy":85,"lodash.keysin":97}],102:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -33535,7 +36722,7 @@ var DropDownMenu = _react2['default'].createClass({
 exports['default'] = DropDownMenu;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../clearfix":88,"../menus/menu":127,"../menus/menu-item":126,"../popover/popover":140,"../popover/popover-animation-from-top":138,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../svg-icons/navigation/arrow-drop-down":170,"../utils/deprecatedPropType":217,"../utils/styles":229,"_process":232,"react":380,"warning":381}],67:[function(require,module,exports){
+},{"../clearfix":124,"../menus/menu":163,"../menus/menu-item":162,"../popover/popover":176,"../popover/popover-animation-from-top":174,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../svg-icons/navigation/arrow-drop-down":206,"../utils/deprecatedPropType":253,"../utils/styles":265,"_process":268,"react":416,"warning":417}],103:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -33550,7 +36737,7 @@ var _DropDownMenu2 = _interopRequireDefault(_DropDownMenu);
 
 exports['default'] = _DropDownMenu2['default'];
 module.exports = exports['default'];
-},{"./DropDownMenu":66}],68:[function(require,module,exports){
+},{"./DropDownMenu":102}],104:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -34039,7 +37226,7 @@ var TextField = _react2['default'].createClass({
 exports['default'] = TextField;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../enhanced-textarea":105,"../mixins/context-pure":129,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/color-manipulator":214,"../utils/unique-id":230,"./TextFieldHint":69,"./TextFieldUnderline":70,"_process":232,"react":380,"react-dom":238,"warning":381}],69:[function(require,module,exports){
+},{"../enhanced-textarea":141,"../mixins/context-pure":165,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/color-manipulator":250,"../utils/unique-id":266,"./TextFieldHint":105,"./TextFieldUnderline":106,"_process":268,"react":416,"react-dom":274,"warning":417}],105:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -34116,7 +37303,7 @@ TextFieldHint.defaultProps = defaultProps;
 
 exports['default'] = TextFieldHint;
 module.exports = exports['default'];
-},{"../styles/transitions":164,"../utils/styles":229,"react":380}],70:[function(require,module,exports){
+},{"../styles/transitions":200,"../utils/styles":265,"react":416}],106:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -34252,7 +37439,7 @@ TextFieldUnderline.defaultProps = defaultProps;
 
 exports['default'] = TextFieldUnderline;
 module.exports = exports['default'];
-},{"../styles/transitions":164,"../utils/styles":229,"react":380}],71:[function(require,module,exports){
+},{"../styles/transitions":200,"../utils/styles":265,"react":416}],107:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -34267,7 +37454,7 @@ var _TextField2 = _interopRequireDefault(_TextField);
 
 exports['default'] = _TextField2['default'];
 module.exports = exports['default'];
-},{"./TextField":68}],72:[function(require,module,exports){
+},{"./TextField":104}],108:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -34644,7 +37831,7 @@ var AppBar = _react2['default'].createClass({
 exports['default'] = AppBar;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./icon-button":112,"./mixins/style-propable":132,"./paper":137,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/typography":165,"./svg-icons/navigation/menu":175,"./utils/prop-types":227,"_process":232,"react":380}],73:[function(require,module,exports){
+},{"./icon-button":148,"./mixins/style-propable":168,"./paper":173,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/typography":201,"./svg-icons/navigation/menu":211,"./utils/prop-types":263,"_process":268,"react":416}],109:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -34745,7 +37932,7 @@ var AppCanvas = _react2['default'].createClass({
 
 exports['default'] = AppCanvas;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"react":380}],74:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"react":416}],110:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35144,7 +38331,7 @@ AutoComplete.Divider = _divider2['default'];
 
 exports['default'] = AutoComplete;
 module.exports = exports['default'];
-},{"./divider":100,"./menus/menu":127,"./menus/menu-item":126,"./mixins/style-propable":132,"./popover/popover":140,"./text-field":191,"./utils/key-code":224,"./utils/prop-types":227,"react":380,"react-dom":238}],75:[function(require,module,exports){
+},{"./divider":136,"./menus/menu":163,"./menus/menu-item":162,"./mixins/style-propable":168,"./popover/popover":176,"./text-field":227,"./utils/key-code":260,"./utils/prop-types":263,"react":416,"react-dom":274}],111:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35331,7 +38518,7 @@ var Avatar = _react2['default'].createClass({
 
 exports['default'] = Avatar;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/colors":156,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"react":380}],76:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/colors":192,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"react":416}],112:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35496,7 +38683,7 @@ var Badge = _react2['default'].createClass({
 
 exports['default'] = Badge;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/typography":165,"react":380}],77:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/typography":201,"react":416}],113:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35653,7 +38840,7 @@ var BeforeAfterWrapper = _react2['default'].createClass({
 
 exports['default'] = BeforeAfterWrapper;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/auto-prefix":153,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"react":380}],78:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/auto-prefix":189,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"react":416}],114:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35755,7 +38942,7 @@ var FlatButtonLabel = _react2['default'].createClass({
 
 exports['default'] = FlatButtonLabel;
 module.exports = exports['default'];
-},{"../mixins/context-pure":129,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],79:[function(require,module,exports){
+},{"../mixins/context-pure":165,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],115:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35857,7 +39044,7 @@ var CardActions = _react2['default'].createClass({
 
 exports['default'] = CardActions;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],80:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],116:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -35997,7 +39184,7 @@ var CardExpandable = _react2['default'].createClass({
 
 exports['default'] = CardExpandable;
 module.exports = exports['default'];
-},{"../icon-button":112,"../mixins/context-pure":129,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../svg-icons/hardware/keyboard-arrow-down":168,"../svg-icons/hardware/keyboard-arrow-up":169,"../utils/extend":220,"react":380}],81:[function(require,module,exports){
+},{"../icon-button":148,"../mixins/context-pure":165,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../svg-icons/hardware/keyboard-arrow-down":204,"../svg-icons/hardware/keyboard-arrow-up":205,"../utils/extend":256,"react":416}],117:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36162,7 +39349,7 @@ var CardHeader = _react2['default'].createClass({
 
 exports['default'] = CardHeader;
 module.exports = exports['default'];
-},{"../avatar":75,"../mixins/style-propable":132,"../styles":158,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],82:[function(require,module,exports){
+},{"../avatar":111,"../mixins/style-propable":168,"../styles":194,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],118:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36332,7 +39519,7 @@ var CardMedia = _react2['default'].createClass({
 
 exports['default'] = CardMedia;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles":158,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],83:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles":194,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],119:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36429,7 +39616,7 @@ var CardText = _react2['default'].createClass({
 
 exports['default'] = CardText;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],84:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],120:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36566,7 +39753,7 @@ var CardTitle = _react2['default'].createClass({
 
 exports['default'] = CardTitle;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles":158,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],85:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles":194,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],121:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36716,7 +39903,7 @@ var Card = _react2['default'].createClass({
 
 exports['default'] = Card;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../paper":137,"./card-expandable":80,"react":380}],86:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../paper":173,"./card-expandable":116,"react":416}],122:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -36933,7 +40120,7 @@ var Checkbox = _react2['default'].createClass({
 
 exports['default'] = Checkbox;
 module.exports = exports['default'];
-},{"./enhanced-switch":104,"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./svg-icons/toggle/check-box":178,"./svg-icons/toggle/check-box-outline-blank":177,"react":380}],87:[function(require,module,exports){
+},{"./enhanced-switch":140,"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./svg-icons/toggle/check-box":214,"./svg-icons/toggle/check-box-outline-blank":213,"react":416}],123:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -37172,7 +40359,7 @@ var CircularProgress = _react2['default'].createClass({
 
 exports['default'] = CircularProgress;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/auto-prefix":153,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380,"react-dom":238}],88:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/auto-prefix":189,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416,"react-dom":274}],124:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -37234,7 +40421,7 @@ ClearFix.propTypes = {
 
 exports['default'] = ClearFix;
 module.exports = exports['default'];
-},{"./before-after-wrapper":77,"react":380}],89:[function(require,module,exports){
+},{"./before-after-wrapper":113,"react":416}],125:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -37345,7 +40532,7 @@ var CalendarMonth = _react2['default'].createClass({
 
 exports['default'] = CalendarMonth;
 module.exports = exports['default'];
-},{"../clearfix":88,"../utils/date-time":216,"./day-button":97,"react":380}],90:[function(require,module,exports){
+},{"../clearfix":124,"../utils/date-time":252,"./day-button":133,"react":416}],126:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -37532,7 +40719,7 @@ var CalendarToolbar = _react2['default'].createClass({
 
 exports['default'] = CalendarToolbar;
 module.exports = exports['default'];
-},{"../icon-button":112,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../svg-icons/navigation/chevron-left":173,"../svg-icons/navigation/chevron-right":174,"../toolbar/toolbar":207,"../toolbar/toolbar-group":204,"../transition-groups/slide-in":212,"react":380}],91:[function(require,module,exports){
+},{"../icon-button":148,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../svg-icons/navigation/chevron-left":209,"../svg-icons/navigation/chevron-right":210,"../toolbar/toolbar":243,"../toolbar/toolbar-group":240,"../transition-groups/slide-in":248,"react":416}],127:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -37657,7 +40844,7 @@ var CalendarYear = _react2['default'].createClass({
 
 exports['default'] = CalendarYear;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/colors":156,"../utils/date-time":216,"./year-button":98,"react":380,"react-dom":238}],92:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/colors":192,"../utils/date-time":252,"./year-button":134,"react":416,"react-dom":274}],128:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -38083,7 +41270,7 @@ var Calendar = _react2['default'].createClass({
 
 exports['default'] = Calendar;
 module.exports = exports['default'];
-},{"../clearfix":88,"../mixins/style-propable":132,"../mixins/window-listenable":134,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../transition-groups/slide-in":212,"../utils/date-time":216,"../utils/key-code":224,"./calendar-month":89,"./calendar-toolbar":90,"./calendar-year":91,"./date-display":93,"react":380}],93:[function(require,module,exports){
+},{"../clearfix":124,"../mixins/style-propable":168,"../mixins/window-listenable":170,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../transition-groups/slide-in":248,"../utils/date-time":252,"../utils/key-code":260,"./calendar-month":125,"./calendar-toolbar":126,"./calendar-year":127,"./date-display":129,"react":416}],129:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -38318,7 +41505,7 @@ var DateDisplay = _react2['default'].createClass({
 
 exports['default'] = DateDisplay;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../transition-groups/slide-in":212,"react":380}],94:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../transition-groups/slide-in":248,"react":416}],130:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -38589,7 +41776,7 @@ var DatePickerDialog = _react2['default'].createClass({
 
 exports['default'] = DatePickerDialog;
 module.exports = exports['default'];
-},{"../dialog":99,"../flat-button":106,"../mixins/context-pure":129,"../mixins/style-propable":132,"../mixins/window-listenable":134,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../utils/date-time":216,"../utils/key-code":224,"./calendar":92,"./date-picker-inline":95,"react":380}],95:[function(require,module,exports){
+},{"../dialog":135,"../flat-button":142,"../mixins/context-pure":165,"../mixins/style-propable":168,"../mixins/window-listenable":170,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../utils/date-time":252,"../utils/key-code":260,"./calendar":128,"./date-picker-inline":131,"react":416}],131:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -38683,7 +41870,7 @@ var DatePickerInline = _react2['default'].createClass({
 
 exports['default'] = DatePickerInline;
 module.exports = exports['default'];
-},{"../paper":137,"react":380}],96:[function(require,module,exports){
+},{"../paper":173,"react":416}],132:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -38941,7 +42128,7 @@ var DatePicker = _react2['default'].createClass({
 exports['default'] = DatePicker;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../mixins/style-propable":132,"../mixins/window-listenable":134,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../text-field":191,"../utils/date-time":216,"./date-picker-dialog":94,"_process":232,"react":380}],97:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../mixins/window-listenable":170,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../text-field":227,"../utils/date-time":252,"./date-picker-dialog":130,"_process":268,"react":416}],133:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -39132,7 +42319,7 @@ var DayButton = _react2['default'].createClass({
 
 exports['default'] = DayButton;
 module.exports = exports['default'];
-},{"../enhanced-button":103,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/date-time":216,"react":380}],98:[function(require,module,exports){
+},{"../enhanced-button":139,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/date-time":252,"react":416}],134:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -39307,7 +42494,7 @@ var YearButton = _react2['default'].createClass({
 
 exports['default'] = YearButton;
 module.exports = exports['default'];
-},{"../enhanced-button":103,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],99:[function(require,module,exports){
+},{"../enhanced-button":139,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],135:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -39980,7 +43167,7 @@ var Dialog = _react2['default'].createClass({
 exports['default'] = Dialog;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./flat-button":106,"./mixins/style-propable":132,"./mixins/window-listenable":134,"./overlay":136,"./paper":137,"./render-to-layer":145,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/deprecatedPropType":217,"./utils/key-code":224,"_process":232,"react":380,"react-addons-transition-group":236,"react-dom":238,"warning":381}],100:[function(require,module,exports){
+},{"./flat-button":142,"./mixins/style-propable":168,"./mixins/window-listenable":170,"./overlay":172,"./paper":173,"./render-to-layer":181,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/deprecatedPropType":253,"./utils/key-code":260,"_process":268,"react":416,"react-addons-transition-group":272,"react-dom":274,"warning":417}],136:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -40054,7 +43241,7 @@ Divider = (0, _muiThemeable2['default'])(Divider);
 
 exports['default'] = Divider;
 module.exports = exports['default'];
-},{"./muiThemeable":135,"./utils/styles":229,"react":380}],101:[function(require,module,exports){
+},{"./muiThemeable":171,"./utils/styles":265,"react":416}],137:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -40249,9 +43436,9 @@ var DropDownIcon = _react2['default'].createClass({
 
 exports['default'] = DropDownIcon;
 module.exports = exports['default'];
-},{"./font-icon":108,"./menu/menu":123,"./mixins/click-awayable":128,"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380}],102:[function(require,module,exports){
-arguments[4][67][0].apply(exports,arguments)
-},{"./DropDownMenu":67,"dup":67}],103:[function(require,module,exports){
+},{"./font-icon":144,"./menu/menu":159,"./mixins/click-awayable":164,"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416}],138:[function(require,module,exports){
+arguments[4][103][0].apply(exports,arguments)
+},{"./DropDownMenu":103,"dup":103}],139:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -40598,7 +43785,7 @@ var EnhancedButton = _react2['default'].createClass({
 
 exports['default'] = EnhancedButton;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./ripples/focus-ripple":147,"./ripples/touch-ripple":149,"./styles/colors":156,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./utils/children":213,"./utils/events":219,"./utils/key-code":224,"react":380,"react-addons-pure-render-mixin":235}],104:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./ripples/focus-ripple":183,"./ripples/touch-ripple":185,"./styles/colors":192,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./utils/children":249,"./utils/events":255,"./utils/key-code":260,"react":416,"react-addons-pure-render-mixin":271}],140:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -41092,7 +44279,7 @@ var EnhancedSwitch = _react2['default'].createClass({
 exports['default'] = EnhancedSwitch;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./clearfix":88,"./mixins/style-propable":132,"./mixins/window-listenable":134,"./paper":137,"./ripples/focus-ripple":147,"./ripples/touch-ripple":149,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/key-code":224,"./utils/unique-id":230,"_process":232,"react":380,"react-dom":238}],105:[function(require,module,exports){
+},{"./clearfix":124,"./mixins/style-propable":168,"./mixins/window-listenable":170,"./paper":173,"./ripples/focus-ripple":183,"./ripples/touch-ripple":185,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/key-code":260,"./utils/unique-id":266,"_process":268,"react":416,"react-dom":274}],141:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -41305,7 +44492,7 @@ var EnhancedTextarea = _react2['default'].createClass({
 
 exports['default'] = EnhancedTextarea;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"react":380,"react-dom":238}],106:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"react":416,"react-dom":274}],142:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -41565,7 +44752,7 @@ var FlatButton = _react2['default'].createClass({
 
 exports['default'] = FlatButton;
 module.exports = exports['default'];
-},{"./buttons/flat-button-label":78,"./enhanced-button":103,"./mixins/context-pure":129,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./styles/typography":165,"./utils/children":213,"./utils/color-manipulator":214,"./utils/immutability-helper":221,"react":380}],107:[function(require,module,exports){
+},{"./buttons/flat-button-label":114,"./enhanced-button":139,"./mixins/context-pure":165,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./styles/typography":201,"./utils/children":249,"./utils/color-manipulator":250,"./utils/immutability-helper":257,"react":416}],143:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -41876,7 +45063,7 @@ var FloatingActionButton = _react2['default'].createClass({
 exports['default'] = FloatingActionButton;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./enhanced-button":103,"./font-icon":108,"./mixins/style-propable":132,"./paper":137,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/children":213,"./utils/color-manipulator":214,"_process":232,"react":380,"react-dom":238,"warning":381}],108:[function(require,module,exports){
+},{"./enhanced-button":139,"./font-icon":144,"./mixins/style-propable":168,"./paper":173,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/children":249,"./utils/color-manipulator":250,"_process":268,"react":416,"react-dom":274,"warning":417}],144:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -42004,7 +45191,7 @@ var FontIcon = _react2['default'].createClass({
 
 exports['default'] = FontIcon;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380}],109:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416}],145:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -42141,7 +45328,7 @@ var GridList = _react2['default'].createClass({
 
 exports['default'] = GridList;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],110:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],146:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -42400,7 +45587,7 @@ var GridTile = _react2['default'].createClass({
 
 exports['default'] = GridTile;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380,"react-dom":238}],111:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416,"react-dom":274}],147:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -42553,7 +45740,7 @@ var SelectableContainerEnhance = function SelectableContainerEnhance(Component) 
   return composed;
 };
 exports.SelectableContainerEnhance = SelectableContainerEnhance;
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../utils/color-manipulator":214,"react":380}],112:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../utils/color-manipulator":250,"react":416}],148:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -42845,7 +46032,7 @@ var IconButton = _react2['default'].createClass({
 
 exports['default'] = IconButton;
 module.exports = exports['default'];
-},{"./enhanced-button":103,"./font-icon":108,"./mixins/context-pure":129,"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./tooltip":208,"./utils/children":213,"./utils/prop-types":227,"react":380}],113:[function(require,module,exports){
+},{"./enhanced-button":139,"./font-icon":144,"./mixins/context-pure":165,"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./tooltip":244,"./utils/children":249,"./utils/prop-types":263,"react":416}],149:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -43300,7 +46487,7 @@ exports['default'] = {
   Tooltip: _tooltip2['default'],
   Utils: _utils2['default']
 };
-},{"./TextField":71,"./app-bar":72,"./app-canvas":73,"./auto-complete":74,"./avatar":75,"./badge":76,"./before-after-wrapper":77,"./card/card":85,"./card/card-actions":79,"./card/card-expandable":80,"./card/card-header":81,"./card/card-media":82,"./card/card-text":83,"./card/card-title":84,"./checkbox":86,"./circular-progress":87,"./clearfix":88,"./date-picker/date-picker":96,"./date-picker/date-picker-dialog":94,"./dialog":99,"./divider":100,"./drop-down-icon":101,"./drop-down-menu":102,"./enhanced-button":103,"./flat-button":106,"./floating-action-button":107,"./font-icon":108,"./grid-list/grid-list":109,"./grid-list/grid-tile":110,"./hoc/selectable-enhance":111,"./icon-button":112,"./left-nav":115,"./linear-progress":116,"./lists/list":119,"./lists/list-divider":117,"./lists/list-item":118,"./menus/icon-menu":125,"./menus/menu":127,"./menus/menu-item":126,"./mixins":131,"./overlay":136,"./paper":137,"./popover/popover":140,"./radio-button":142,"./radio-button-group":141,"./raised-button":143,"./refresh-indicator":144,"./ripples":148,"./select-field":150,"./slider":151,"./snackbar":152,"./styles":158,"./svg-icon":167,"./svg-icons/navigation/chevron-left":173,"./svg-icons/navigation/chevron-right":174,"./svg-icons/navigation/menu":175,"./table/table":187,"./table/table-body":181,"./table/table-footer":182,"./table/table-header":184,"./table/table-header-column":183,"./table/table-row":186,"./table/table-row-column":185,"./tabs/tab":188,"./tabs/tabs":190,"./theme-wrapper":192,"./time-picker":199,"./toggle":203,"./toolbar/toolbar":207,"./toolbar/toolbar-group":204,"./toolbar/toolbar-separator":205,"./toolbar/toolbar-title":206,"./tooltip":208,"./utils":222}],114:[function(require,module,exports){
+},{"./TextField":107,"./app-bar":108,"./app-canvas":109,"./auto-complete":110,"./avatar":111,"./badge":112,"./before-after-wrapper":113,"./card/card":121,"./card/card-actions":115,"./card/card-expandable":116,"./card/card-header":117,"./card/card-media":118,"./card/card-text":119,"./card/card-title":120,"./checkbox":122,"./circular-progress":123,"./clearfix":124,"./date-picker/date-picker":132,"./date-picker/date-picker-dialog":130,"./dialog":135,"./divider":136,"./drop-down-icon":137,"./drop-down-menu":138,"./enhanced-button":139,"./flat-button":142,"./floating-action-button":143,"./font-icon":144,"./grid-list/grid-list":145,"./grid-list/grid-tile":146,"./hoc/selectable-enhance":147,"./icon-button":148,"./left-nav":151,"./linear-progress":152,"./lists/list":155,"./lists/list-divider":153,"./lists/list-item":154,"./menus/icon-menu":161,"./menus/menu":163,"./menus/menu-item":162,"./mixins":167,"./overlay":172,"./paper":173,"./popover/popover":176,"./radio-button":178,"./radio-button-group":177,"./raised-button":179,"./refresh-indicator":180,"./ripples":184,"./select-field":186,"./slider":187,"./snackbar":188,"./styles":194,"./svg-icon":203,"./svg-icons/navigation/chevron-left":209,"./svg-icons/navigation/chevron-right":210,"./svg-icons/navigation/menu":211,"./table/table":223,"./table/table-body":217,"./table/table-footer":218,"./table/table-header":220,"./table/table-header-column":219,"./table/table-row":222,"./table/table-row-column":221,"./tabs/tab":224,"./tabs/tabs":226,"./theme-wrapper":228,"./time-picker":235,"./toggle":239,"./toolbar/toolbar":243,"./toolbar/toolbar-group":240,"./toolbar/toolbar-separator":241,"./toolbar/toolbar-title":242,"./tooltip":244,"./utils":258}],150:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -43408,7 +46595,7 @@ var InkBar = _react2['default'].createClass({
 
 exports['default'] = InkBar;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380}],115:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416}],151:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -43998,7 +47185,7 @@ var LeftNav = _react2['default'].createClass({
 exports['default'] = LeftNav;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./menu/menu":123,"./mixins/style-propable":132,"./mixins/window-listenable":134,"./overlay":136,"./paper":137,"./styles/auto-prefix":153,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/deprecatedPropType":217,"./utils/is-browser":223,"./utils/key-code":224,"./utils/modernizr.custom":226,"_process":232,"react":380,"react-dom":238,"warning":381}],116:[function(require,module,exports){
+},{"./menu/menu":159,"./mixins/style-propable":168,"./mixins/window-listenable":170,"./overlay":172,"./paper":173,"./styles/auto-prefix":189,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/deprecatedPropType":253,"./utils/is-browser":259,"./utils/key-code":260,"./utils/modernizr.custom":262,"_process":268,"react":416,"react-dom":274,"warning":417}],152:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -44210,7 +47397,7 @@ var LinearProgress = _react2['default'].createClass({
 
 exports['default'] = LinearProgress;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380,"react-dom":238}],117:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416,"react-dom":274}],153:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -44247,7 +47434,7 @@ var ListDivider = _react2['default'].createClass({
 exports['default'] = ListDivider;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../divider":100,"_process":232,"react":380,"warning":381}],118:[function(require,module,exports){
+},{"../divider":136,"_process":268,"react":416,"warning":417}],154:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -44788,7 +47975,7 @@ var ListItem = _react2['default'].createClass({
 
 exports['default'] = ListItem;
 module.exports = exports['default'];
-},{"../enhanced-button":103,"../icon-button":112,"../mixins/style-propable":132,"../styles/colors":156,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../styles/typography":165,"../svg-icons/navigation/arrow-drop-down":170,"../svg-icons/navigation/arrow-drop-up":171,"../utils/color-manipulator":214,"./nested-list":120,"react":380,"react-addons-pure-render-mixin":235,"react-dom":238}],119:[function(require,module,exports){
+},{"../enhanced-button":139,"../icon-button":148,"../mixins/style-propable":168,"../styles/colors":192,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../styles/typography":201,"../svg-icons/navigation/arrow-drop-down":206,"../svg-icons/navigation/arrow-drop-up":207,"../utils/color-manipulator":250,"./nested-list":156,"react":416,"react-addons-pure-render-mixin":271,"react-dom":274}],155:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -44935,7 +48122,7 @@ var List = _react2['default'].createClass({
 
 exports['default'] = List;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../paper":137,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/typography":165,"../utils/prop-types":227,"react":380,"react-addons-pure-render-mixin":235}],120:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../paper":173,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/typography":201,"../utils/prop-types":263,"react":416,"react-addons-pure-render-mixin":271}],156:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -45005,7 +48192,7 @@ var NestedList = _react2['default'].createClass({
 
 exports['default'] = NestedList;
 module.exports = exports['default'];
-},{"../utils/immutability-helper":221,"./list":119,"react":380}],121:[function(require,module,exports){
+},{"../utils/immutability-helper":257,"./list":155,"react":416}],157:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -45158,7 +48345,7 @@ var LinkMenuItem = _react2['default'].createClass({
 
 exports['default'] = LinkMenuItem;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],122:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],158:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -45437,7 +48624,7 @@ var MenuItem = _react2['default'].createClass({
 exports['default'] = MenuItem;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../font-icon":108,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../toggle":203,"_process":232,"react":380,"warning":381}],123:[function(require,module,exports){
+},{"../font-icon":144,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../toggle":239,"_process":268,"react":416,"warning":417}],159:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -46137,7 +49324,7 @@ var Menu = _react2['default'].createClass({
 exports['default'] = Menu;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../mixins/click-awayable":128,"../mixins/style-propable":132,"../paper":137,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/css-event":215,"../utils/key-code":224,"../utils/key-line":225,"./link-menu-item":121,"./menu-item":122,"./subheader-menu-item":124,"_process":232,"react":380,"react-dom":238,"warning":381}],124:[function(require,module,exports){
+},{"../mixins/click-awayable":164,"../mixins/style-propable":168,"../paper":173,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/css-event":251,"../utils/key-code":260,"../utils/key-line":261,"./link-menu-item":157,"./menu-item":158,"./subheader-menu-item":160,"_process":268,"react":416,"react-dom":274,"warning":417}],160:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -46258,7 +49445,7 @@ var SubheaderMenuItem = _react2['default'].createClass({
 
 exports['default'] = SubheaderMenuItem;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/typography":165,"react":380}],125:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/typography":201,"react":416}],161:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -46585,7 +49772,7 @@ var IconMenu = _react2['default'].createClass({
 exports['default'] = IconMenu;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../menus/menu":127,"../mixins/style-propable":132,"../popover/popover":140,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../utils/events":219,"../utils/prop-types":227,"_process":232,"react":380,"react-dom":238,"warning":381}],126:[function(require,module,exports){
+},{"../menus/menu":163,"../mixins/style-propable":168,"../popover/popover":176,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../utils/events":255,"../utils/prop-types":263,"_process":268,"react":416,"react-dom":274,"warning":417}],162:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -46891,7 +50078,7 @@ var MenuItem = _react2['default'].createClass({
 
 exports['default'] = MenuItem;
 module.exports = exports['default'];
-},{"../lists/list-item":118,"../mixins/style-propable":132,"../popover/popover":140,"../styles/colors":156,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../svg-icons/navigation/check":172,"./menu":127,"react":380,"react-addons-pure-render-mixin":235,"react-dom":238}],127:[function(require,module,exports){
+},{"../lists/list-item":154,"../mixins/style-propable":168,"../popover/popover":176,"../styles/colors":192,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../svg-icons/navigation/check":208,"./menu":163,"react":416,"react-addons-pure-render-mixin":271,"react-dom":274}],163:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47449,7 +50636,7 @@ var Menu = _react2['default'].createClass({
 
 exports['default'] = Menu;
 module.exports = exports['default'];
-},{"../lists/list":119,"../mixins/click-awayable":128,"../mixins/controllable":130,"../mixins/style-propable":132,"../paper":137,"../styles/auto-prefix":153,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/key-code":224,"../utils/prop-types":227,"react":380,"react-addons-update":237,"react-dom":238}],128:[function(require,module,exports){
+},{"../lists/list":155,"../mixins/click-awayable":164,"../mixins/controllable":166,"../mixins/style-propable":168,"../paper":173,"../styles/auto-prefix":189,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/key-code":260,"../utils/prop-types":263,"react":416,"react-addons-update":273,"react-dom":274}],164:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47508,7 +50695,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"../utils/dom":218,"../utils/events":219,"react-dom":238}],129:[function(require,module,exports){
+},{"../utils/dom":254,"../utils/events":255,"react-dom":274}],165:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47574,7 +50761,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"../utils/shallow-equal":228}],130:[function(require,module,exports){
+},{"../utils/shallow-equal":264}],166:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47613,7 +50800,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"react":380}],131:[function(require,module,exports){
+},{"react":416}],167:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47648,7 +50835,7 @@ exports['default'] = {
   StylePropable: _stylePropable2['default'],
   StyleResizable: _styleResizable2['default']
 };
-},{"./click-awayable":128,"./style-propable":132,"./style-resizable":133,"./window-listenable":134}],132:[function(require,module,exports){
+},{"./click-awayable":164,"./style-propable":168,"./style-resizable":169,"./window-listenable":170}],168:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47704,7 +50891,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{"../utils/immutability-helper":221,"../utils/styles":229,"react":380}],133:[function(require,module,exports){
+},{"../utils/immutability-helper":257,"../utils/styles":265,"react":416}],169:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47762,7 +50949,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{"../utils/events":219}],134:[function(require,module,exports){
+},{"../utils/events":255}],170:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47797,7 +50984,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"../utils/events":219}],135:[function(require,module,exports){
+},{"../utils/events":255}],171:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47846,7 +51033,7 @@ function muiThemeable(WrappedComponent) {
 }
 
 module.exports = exports['default'];
-},{"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"react":380}],136:[function(require,module,exports){
+},{"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"react":416}],172:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -47993,7 +51180,7 @@ var Overlay = _react2['default'].createClass({
 
 exports['default'] = Overlay;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/colors":156,"./styles/transitions":164,"react":380,"react-dom":238}],137:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/colors":192,"./styles/transitions":200,"react":416,"react-dom":274}],173:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -48127,7 +51314,7 @@ var Paper = _react2['default'].createClass({
 
 exports['default'] = Paper;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/prop-types":227,"react":380,"react-addons-pure-render-mixin":235}],138:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/prop-types":263,"react":416,"react-addons-pure-render-mixin":271}],174:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -48275,7 +51462,7 @@ var PopoverAnimationFromTop = _react2['default'].createClass({
 
 exports['default'] = PopoverAnimationFromTop;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../paper":137,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/prop-types":227,"react":380}],139:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../paper":173,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/prop-types":263,"react":416}],175:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -48457,7 +51644,7 @@ var PopoverDefaultAnimation = _react2['default'].createClass({
 
 exports['default'] = PopoverDefaultAnimation;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../paper":137,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"../utils/prop-types":227,"react":380}],140:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../paper":173,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"../utils/prop-types":263,"react":416}],176:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -48843,7 +52030,7 @@ var Popover = _react2['default'].createClass({
 
 exports['default'] = Popover;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../mixins/window-listenable":134,"../paper":137,"../render-to-layer":145,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../utils/extend":220,"../utils/prop-types":227,"./popover-default-animation":139,"lodash.throttle":64,"react":380,"react-dom":238}],141:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../mixins/window-listenable":170,"../paper":173,"../render-to-layer":181,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../utils/extend":256,"../utils/prop-types":263,"./popover-default-animation":175,"lodash.throttle":100,"react":416,"react-dom":274}],177:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -49025,7 +52212,7 @@ var RadioButtonGroup = _react2['default'].createClass({
 exports['default'] = RadioButtonGroup;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./mixins/style-propable":132,"./radio-button":142,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"_process":232,"react":380}],142:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./radio-button":178,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"_process":268,"react":416}],178:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -49224,7 +52411,7 @@ var RadioButton = _react2['default'].createClass({
 
 exports['default'] = RadioButton;
 module.exports = exports['default'];
-},{"./enhanced-switch":104,"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./svg-icons/toggle/radio-button-checked":179,"./svg-icons/toggle/radio-button-unchecked":180,"react":380}],143:[function(require,module,exports){
+},{"./enhanced-switch":140,"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./svg-icons/toggle/radio-button-checked":215,"./svg-icons/toggle/radio-button-unchecked":216,"react":416}],179:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -49552,7 +52739,7 @@ var RaisedButton = _react2['default'].createClass({
 
 exports['default'] = RaisedButton;
 module.exports = exports['default'];
-},{"./enhanced-button":103,"./mixins/style-propable":132,"./paper":137,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./styles/typography":165,"./utils/children":213,"./utils/color-manipulator":214,"react":380,"react-dom":238}],144:[function(require,module,exports){
+},{"./enhanced-button":139,"./mixins/style-propable":168,"./paper":173,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./styles/typography":201,"./utils/children":249,"./utils/color-manipulator":250,"react":416,"react-dom":274}],180:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -49907,7 +53094,7 @@ var RefreshIndicator = _react2['default'].createClass({
 
 exports['default'] = RefreshIndicator;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./paper":137,"./styles/auto-prefix":153,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380,"react-dom":238}],145:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./paper":173,"./styles/auto-prefix":189,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416,"react-dom":274}],181:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50091,7 +53278,7 @@ var RenderToLayer = _react2['default'].createClass({
 
 exports['default'] = RenderToLayer;
 module.exports = exports['default'];
-},{"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./utils/dom":218,"react":380,"react-dom":238}],146:[function(require,module,exports){
+},{"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./utils/dom":254,"react":416,"react-dom":274}],182:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50223,7 +53410,7 @@ var CircleRipple = _react2['default'].createClass({
 
 exports['default'] = CircleRipple;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/auto-prefix":153,"../styles/colors":156,"../styles/transitions":164,"react":380,"react-addons-pure-render-mixin":235,"react-dom":238}],147:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/auto-prefix":189,"../styles/colors":192,"../styles/transitions":200,"react":416,"react-addons-pure-render-mixin":271,"react-dom":274}],183:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50384,7 +53571,7 @@ var FocusRipple = _react2['default'].createClass({
 
 exports['default'] = FocusRipple;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/auto-prefix":153,"../styles/colors":156,"../styles/transitions":164,"../transition-groups/scale-in":210,"react":380,"react-addons-pure-render-mixin":235,"react-dom":238}],148:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/auto-prefix":189,"../styles/colors":192,"../styles/transitions":200,"../transition-groups/scale-in":246,"react":416,"react-addons-pure-render-mixin":271,"react-dom":274}],184:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50413,7 +53600,7 @@ exports['default'] = {
   FocusRipple: _focusRipple2['default'],
   TouchRipple: _touchRipple2['default']
 };
-},{"./circle-ripple":146,"./focus-ripple":147,"./touch-ripple":149}],149:[function(require,module,exports){
+},{"./circle-ripple":182,"./focus-ripple":183,"./touch-ripple":185}],185:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50615,7 +53802,7 @@ var TouchRipple = _react2['default'].createClass({
 
 exports['default'] = TouchRipple;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../utils/dom":218,"../utils/immutability-helper":221,"./circle-ripple":146,"react":380,"react-addons-pure-render-mixin":235,"react-addons-transition-group":236,"react-dom":238}],150:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../utils/dom":254,"../utils/immutability-helper":257,"./circle-ripple":182,"react":416,"react-addons-pure-render-mixin":271,"react-addons-transition-group":272,"react-dom":274}],186:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -50812,7 +53999,7 @@ var SelectField = _react2['default'].createClass({
 
 exports['default'] = SelectField;
 module.exports = exports['default'];
-},{"./drop-down-menu":102,"./mixins/context-pure":129,"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./text-field":191,"react":380}],151:[function(require,module,exports){
+},{"./drop-down-menu":138,"./mixins/context-pure":165,"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./text-field":227,"react":416}],187:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -51347,7 +54534,7 @@ var Slider = _react2['default'].createClass({
 
 exports['default'] = Slider;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./ripples/focus-ripple":147,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380,"react-dom":238}],152:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./ripples/focus-ripple":183,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416,"react-dom":274}],188:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -51765,7 +54952,7 @@ var Snackbar = _react2['default'].createClass({
 exports['default'] = Snackbar;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"./flat-button":106,"./mixins/click-awayable":128,"./mixins/context-pure":129,"./mixins/style-propable":132,"./mixins/style-resizable":133,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"./utils/deprecatedPropType":217,"_process":232,"react":380,"warning":381}],153:[function(require,module,exports){
+},{"./flat-button":142,"./mixins/click-awayable":164,"./mixins/context-pure":165,"./mixins/style-propable":168,"./mixins/style-resizable":169,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"./utils/deprecatedPropType":253,"_process":268,"react":416,"warning":417}],189:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -51846,7 +55033,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"inline-style-prefixer":32}],154:[function(require,module,exports){
+},{"inline-style-prefixer":68}],190:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -51887,7 +55074,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{"../../utils/color-manipulator":214,"../colors":156,"../spacing":161}],155:[function(require,module,exports){
+},{"../../utils/color-manipulator":250,"../colors":192,"../spacing":197}],191:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -51934,7 +55121,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{"../../utils/color-manipulator":214,"../colors":156,"../spacing":161}],156:[function(require,module,exports){
+},{"../../utils/color-manipulator":250,"../colors":192,"../spacing":197}],192:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52228,7 +55415,7 @@ exports['default'] = {
   lightWhite: 'rgba(255, 255, 255, 0.54)'
 };
 module.exports = exports['default'];
-},{}],157:[function(require,module,exports){
+},{}],193:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52483,7 +55670,7 @@ function getMuiTheme(baseTheme, muiTheme) {
 }
 
 module.exports = exports['default'];
-},{"../utils/color-manipulator":214,"./baseThemes/lightBaseTheme":155,"./colors":156,"./zIndex":166,"lodash.merge":62}],158:[function(require,module,exports){
+},{"../utils/color-manipulator":250,"./baseThemes/lightBaseTheme":191,"./colors":192,"./zIndex":202,"lodash.merge":98}],194:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52564,7 +55751,7 @@ exports['default'] = {
   ThemeDecorator: _themeDecorator2['default'],
   ZIndex: _zIndex2['default']
 };
-},{"./auto-prefix":153,"./baseThemes/darkBaseTheme":154,"./baseThemes/lightBaseTheme":155,"./colors":156,"./raw-themes/dark-raw-theme":159,"./raw-themes/light-raw-theme":160,"./spacing":161,"./theme-decorator":162,"./theme-manager":163,"./transitions":164,"./typography":165,"./zIndex":166}],159:[function(require,module,exports){
+},{"./auto-prefix":189,"./baseThemes/darkBaseTheme":190,"./baseThemes/lightBaseTheme":191,"./colors":192,"./raw-themes/dark-raw-theme":195,"./raw-themes/light-raw-theme":196,"./spacing":197,"./theme-decorator":198,"./theme-manager":199,"./transitions":200,"./typography":201,"./zIndex":202}],195:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52585,7 +55772,7 @@ exports['default'] = _interopRequire(_baseThemesDarkBaseTheme);
 //   'material-ui/lib/styles/baseThemes/darkBaseTheme'
 // );
 module.exports = exports['default'];
-},{"../baseThemes/darkBaseTheme":154}],160:[function(require,module,exports){
+},{"../baseThemes/darkBaseTheme":190}],196:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52606,7 +55793,7 @@ exports['default'] = _interopRequire(_baseThemesLightBaseTheme);
 //   'material-ui/lib/styles/baseThemes/lightBaseTheme'
 // );
 module.exports = exports['default'];
-},{"../baseThemes/lightBaseTheme":155}],161:[function(require,module,exports){
+},{"../baseThemes/lightBaseTheme":191}],197:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -52627,7 +55814,7 @@ exports["default"] = {
   desktopToolbarHeight: 56
 };
 module.exports = exports["default"];
-},{}],162:[function(require,module,exports){
+},{}],198:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52664,7 +55851,7 @@ exports['default'] = function (customTheme) {
 };
 
 module.exports = exports['default'];
-},{"react":380}],163:[function(require,module,exports){
+},{"react":416}],199:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52706,7 +55893,7 @@ exports['default'] = // deprecatedExport(
 //  'material-ui/lib/styles/themeManager'
 //);
 module.exports = exports['default'];
-},{"../utils/extend":220,"./getMuiTheme":157,"react-addons-update":237}],164:[function(require,module,exports){
+},{"../utils/extend":256,"./getMuiTheme":193,"react-addons-update":273}],200:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52744,7 +55931,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{}],165:[function(require,module,exports){
+},{}],201:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52781,7 +55968,7 @@ var Typography = function Typography() {
 
 exports['default'] = new Typography();
 module.exports = exports['default'];
-},{"./colors":156}],166:[function(require,module,exports){
+},{"./colors":192}],202:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -52800,7 +55987,7 @@ exports["default"] = {
   tooltip: 3000
 };
 module.exports = exports["default"];
-},{}],167:[function(require,module,exports){
+},{}],203:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52942,7 +56129,7 @@ var SvgIcon = _react2['default'].createClass({
 
 exports['default'] = SvgIcon;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380}],168:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416}],204:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -52980,7 +56167,7 @@ var HardwareKeyboardArrowDown = _react2['default'].createClass({
 
 exports['default'] = HardwareKeyboardArrowDown;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],169:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],205:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53018,7 +56205,7 @@ var HardwareKeyboardArrowUp = _react2['default'].createClass({
 
 exports['default'] = HardwareKeyboardArrowUp;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],170:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],206:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53056,7 +56243,7 @@ var NavigationArrowDropDown = _react2['default'].createClass({
 
 exports['default'] = NavigationArrowDropDown;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],171:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],207:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53094,7 +56281,7 @@ var NavigationArrowDropUp = _react2['default'].createClass({
 
 exports['default'] = NavigationArrowDropUp;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],172:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],208:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53132,7 +56319,7 @@ var NavigationCheck = _react2['default'].createClass({
 
 exports['default'] = NavigationCheck;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],173:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],209:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53170,7 +56357,7 @@ var NavigationChevronLeft = _react2['default'].createClass({
 
 exports['default'] = NavigationChevronLeft;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],174:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],210:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53208,7 +56395,7 @@ var NavigationChevronRight = _react2['default'].createClass({
 
 exports['default'] = NavigationChevronRight;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],175:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],211:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53246,7 +56433,7 @@ var NavigationMenu = _react2['default'].createClass({
 
 exports['default'] = NavigationMenu;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],176:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],212:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53284,7 +56471,7 @@ var NavigationMoreVert = _react2['default'].createClass({
 
 exports['default'] = NavigationMoreVert;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],177:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],213:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53322,7 +56509,7 @@ var ToggleCheckBoxOutlineBlank = _react2['default'].createClass({
 
 exports['default'] = ToggleCheckBoxOutlineBlank;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],178:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],214:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53360,7 +56547,7 @@ var ToggleCheckBox = _react2['default'].createClass({
 
 exports['default'] = ToggleCheckBox;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],179:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],215:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53398,7 +56585,7 @@ var ToggleRadioButtonChecked = _react2['default'].createClass({
 
 exports['default'] = ToggleRadioButtonChecked;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],180:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],216:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53436,7 +56623,7 @@ var ToggleRadioButtonUnchecked = _react2['default'].createClass({
 
 exports['default'] = ToggleRadioButtonUnchecked;
 module.exports = exports['default'];
-},{"../../svg-icon":167,"react":380,"react-addons-pure-render-mixin":235}],181:[function(require,module,exports){
+},{"../../svg-icon":203,"react":416,"react-addons-pure-render-mixin":271}],217:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -53854,7 +57041,7 @@ var TableBody = _react2['default'].createClass({
 
 exports['default'] = TableBody;
 module.exports = exports['default'];
-},{"../checkbox":86,"../mixins/click-awayable":128,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./table-row-column":185,"react":380}],182:[function(require,module,exports){
+},{"../checkbox":122,"../mixins/click-awayable":164,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./table-row-column":221,"react":416}],218:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -54013,7 +57200,7 @@ var TableFooter = _react2['default'].createClass({
 
 exports['default'] = TableFooter;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./table-row-column":185,"react":380}],183:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./table-row-column":221,"react":416}],219:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -54179,7 +57366,7 @@ var TableHeaderColumn = _react2['default'].createClass({
 
 exports['default'] = TableHeaderColumn;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../tooltip":208,"react":380}],184:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../tooltip":244,"react":416}],220:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -54391,7 +57578,7 @@ var TableHeader = _react2['default'].createClass({
 
 exports['default'] = TableHeader;
 module.exports = exports['default'];
-},{"../checkbox":86,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./table-header-column":183,"react":380}],185:[function(require,module,exports){
+},{"../checkbox":122,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./table-header-column":219,"react":416}],221:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -54558,7 +57745,7 @@ var TableRowColumn = _react2['default'].createClass({
 
 exports['default'] = TableRowColumn;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],186:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],222:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -54787,7 +57974,7 @@ var TableRow = _react2['default'].createClass({
 
 exports['default'] = TableRow;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],187:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],223:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -55106,7 +58293,7 @@ var Table = _react2['default'].createClass({
 
 exports['default'] = Table;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380,"react-dom":238}],188:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416,"react-dom":274}],224:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -55262,7 +58449,7 @@ var Tab = _react2['default'].createClass({
 
 exports['default'] = Tab;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],189:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],225:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -55307,7 +58494,7 @@ var TabTemplate = _react2['default'].createClass({
 
 exports['default'] = TabTemplate;
 module.exports = exports['default'];
-},{"react":380}],190:[function(require,module,exports){
+},{"react":416}],226:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -55598,9 +58785,9 @@ var Tabs = _react2['default'].createClass({
 exports['default'] = Tabs;
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../ink-bar":114,"../mixins/controllable":130,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./tabTemplate":189,"_process":232,"react":380,"react-dom":238,"warning":381}],191:[function(require,module,exports){
-arguments[4][71][0].apply(exports,arguments)
-},{"./TextField":71,"dup":71}],192:[function(require,module,exports){
+},{"../ink-bar":150,"../mixins/controllable":166,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./tabTemplate":225,"_process":268,"react":416,"react-dom":274,"warning":417}],227:[function(require,module,exports){
+arguments[4][107][0].apply(exports,arguments)
+},{"./TextField":107,"dup":107}],228:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -55636,7 +58823,7 @@ exports['default'] = _react2['default'].createClass({
   }
 });
 module.exports = exports['default'];
-},{"react":380}],193:[function(require,module,exports){
+},{"react":416}],229:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -55802,7 +58989,7 @@ var ClockButton = _react2['default'].createClass({
 
 exports['default'] = ClockButton;
 module.exports = exports['default'];
-},{"../enhanced-button":103,"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"react":380}],194:[function(require,module,exports){
+},{"../enhanced-button":139,"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"react":416}],230:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56062,7 +59249,7 @@ var ClockHours = _react2['default'].createClass({
 
 exports['default'] = ClockHours;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./clock-number":196,"./clock-pointer":197,"react":380,"react-dom":238}],195:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./clock-number":232,"./clock-pointer":233,"react":416,"react-dom":274}],231:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56287,7 +59474,7 @@ var ClockMinutes = _react2['default'].createClass({
 
 exports['default'] = ClockMinutes;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./clock-number":196,"./clock-pointer":197,"react":380,"react-dom":238}],196:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./clock-number":232,"./clock-pointer":233,"react":416,"react-dom":274}],232:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56432,7 +59619,7 @@ var ClockNumber = _react2['default'].createClass({
 
 exports['default'] = ClockNumber;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],197:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],233:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56580,7 +59767,7 @@ var ClockPointer = _react2['default'].createClass({
 
 exports['default'] = ClockPointer;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],198:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],234:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56830,7 +60017,7 @@ var Clock = _react2['default'].createClass({
 
 exports['default'] = Clock;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./clock-button":193,"./clock-hours":194,"./clock-minutes":195,"./time-display":200,"react":380}],199:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./clock-button":229,"./clock-hours":230,"./clock-minutes":231,"./time-display":236,"react":416}],235:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -56845,7 +60032,7 @@ var _timePicker2 = _interopRequireDefault(_timePicker);
 
 exports['default'] = _timePicker2['default'];
 module.exports = exports['default'];
-},{"./time-picker":202}],200:[function(require,module,exports){
+},{"./time-picker":238}],236:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -57040,7 +60227,7 @@ var TimeDisplay = _react2['default'].createClass({
 
 exports['default'] = TimeDisplay;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],201:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],237:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -57228,7 +60415,7 @@ var TimePickerDialog = _react2['default'].createClass({
 
 exports['default'] = TimePickerDialog;
 module.exports = exports['default'];
-},{"../dialog":99,"../flat-button":106,"../mixins/style-propable":132,"../mixins/window-listenable":134,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../utils/key-code":224,"./clock":198,"react":380}],202:[function(require,module,exports){
+},{"../dialog":135,"../flat-button":142,"../mixins/style-propable":168,"../mixins/window-listenable":170,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../utils/key-code":260,"./clock":234,"react":416}],238:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -57449,7 +60636,7 @@ var TimePicker = _react2['default'].createClass({
 
 exports['default'] = TimePicker;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../mixins/window-listenable":134,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../text-field":191,"./time-picker-dialog":201,"react":380}],203:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../mixins/window-listenable":170,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../text-field":227,"./time-picker-dialog":237,"react":416}],239:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -57672,7 +60859,7 @@ var Toggle = _react2['default'].createClass({
 
 exports['default'] = Toggle;
 module.exports = exports['default'];
-},{"./enhanced-switch":104,"./mixins/style-propable":132,"./paper":137,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380}],204:[function(require,module,exports){
+},{"./enhanced-switch":140,"./mixins/style-propable":168,"./paper":173,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416}],240:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -57928,7 +61115,7 @@ var ToolbarGroup = _react2['default'].createClass({
 
 exports['default'] = ToolbarGroup;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/colors":156,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],205:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/colors":192,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],241:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58040,7 +61227,7 @@ var ToolbarSeparator = _react2['default'].createClass({
 
 exports['default'] = ToolbarSeparator;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],206:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],242:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58160,7 +61347,7 @@ var ToolbarTitle = _react2['default'].createClass({
 
 exports['default'] = ToolbarTitle;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],207:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],243:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58292,7 +61479,7 @@ var Toolbar = _react2['default'].createClass({
 
 exports['default'] = Toolbar;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"react":380}],208:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"react":416}],244:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58505,7 +61692,7 @@ var Tooltip = _react2['default'].createClass({
 
 exports['default'] = Tooltip;
 module.exports = exports['default'];
-},{"./mixins/style-propable":132,"./styles/colors":156,"./styles/raw-themes/light-raw-theme":160,"./styles/theme-manager":163,"./styles/transitions":164,"react":380,"react-dom":238}],209:[function(require,module,exports){
+},{"./mixins/style-propable":168,"./styles/colors":192,"./styles/raw-themes/light-raw-theme":196,"./styles/theme-manager":199,"./styles/transitions":200,"react":416,"react-dom":274}],245:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58680,7 +61867,7 @@ var ScaleInChild = _react2['default'].createClass({
 
 exports['default'] = ScaleInChild;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/auto-prefix":153,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"react":380,"react-addons-pure-render-mixin":235,"react-dom":238}],210:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/auto-prefix":189,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"react":416,"react-addons-pure-render-mixin":271,"react-dom":274}],246:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58816,7 +62003,7 @@ var ScaleIn = _react2['default'].createClass({
 
 exports['default'] = ScaleIn;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./scale-in-child":209,"react":380,"react-addons-pure-render-mixin":235,"react-addons-transition-group":236}],211:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./scale-in-child":245,"react":416,"react-addons-pure-render-mixin":271,"react-addons-transition-group":272}],247:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -58976,7 +62163,7 @@ var SlideInChild = _react2['default'].createClass({
 
 exports['default'] = SlideInChild;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/auto-prefix":153,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"../styles/transitions":164,"react":380,"react-dom":238}],212:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/auto-prefix":189,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"../styles/transitions":200,"react":416,"react-dom":274}],248:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59113,7 +62300,7 @@ var SlideIn = _react2['default'].createClass({
 
 exports['default'] = SlideIn;
 module.exports = exports['default'];
-},{"../mixins/style-propable":132,"../styles/raw-themes/light-raw-theme":160,"../styles/theme-manager":163,"./slide-in-child":211,"react":380,"react-addons-transition-group":236}],213:[function(require,module,exports){
+},{"../mixins/style-propable":168,"../styles/raw-themes/light-raw-theme":196,"../styles/theme-manager":199,"./slide-in-child":247,"react":416,"react-addons-transition-group":272}],249:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59167,7 +62354,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"react":380,"react-addons-create-fragment":233}],214:[function(require,module,exports){
+},{"react":416,"react-addons-create-fragment":269}],250:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59346,7 +62533,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{}],215:[function(require,module,exports){
+},{}],251:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59408,7 +62595,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{"./events":219}],216:[function(require,module,exports){
+},{"./events":255}],252:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -59570,7 +62757,7 @@ exports['default'] = {
 };
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"_process":232,"warning":381}],217:[function(require,module,exports){
+},{"_process":268,"warning":417}],253:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -59597,7 +62784,7 @@ function deprecated(propType, explanation) {
 
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"_process":232,"warning":381}],218:[function(require,module,exports){
+},{"_process":268,"warning":417}],254:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59678,7 +62865,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{}],219:[function(require,module,exports){
+},{}],255:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59723,7 +62910,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{}],220:[function(require,module,exports){
+},{}],256:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59777,7 +62964,7 @@ var extend = function extend(base, override) {
 
 exports['default'] = extend;
 module.exports = exports['default'];
-},{}],221:[function(require,module,exports){
+},{}],257:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59827,7 +63014,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"react-addons-update":237}],222:[function(require,module,exports){
+},{"react-addons-update":273}],258:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59898,7 +63085,7 @@ exports['default'] = {
   UniqueId: _uniqueId2['default'],
   Styles: _styles2['default']
 };
-},{"./color-manipulator":214,"./css-event":215,"./dom":218,"./events":219,"./extend":220,"./immutability-helper":221,"./key-code":224,"./key-line":225,"./styles":229,"./unique-id":230}],223:[function(require,module,exports){
+},{"./color-manipulator":250,"./css-event":251,"./dom":254,"./events":255,"./extend":256,"./immutability-helper":257,"./key-code":260,"./key-line":261,"./styles":265,"./unique-id":266}],259:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -59906,7 +63093,7 @@ Object.defineProperty(exports, '__esModule', {
 });
 exports['default'] = !!(typeof window !== 'undefined' && window.document && window.document.createElement);
 module.exports = exports['default'];
-},{}],224:[function(require,module,exports){
+},{}],260:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -59923,7 +63110,7 @@ exports["default"] = {
   UP: 38
 };
 module.exports = exports["default"];
-},{}],225:[function(require,module,exports){
+},{}],261:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -59943,7 +63130,7 @@ exports["default"] = {
   }
 };
 module.exports = exports["default"];
-},{}],226:[function(require,module,exports){
+},{}],262:[function(require,module,exports){
 /* Modernizr 2.8.3 (Custom Build) | MIT & BSD
  * Build: http://modernizr.com/download/#-borderradius-boxshadow-opacity-csstransforms-csstransforms3d-csstransitions-prefixed-teststyles-testprop-testallprops-prefixes-domprefixes
  */
@@ -60209,7 +63396,7 @@ exports['default'] = (function (window, document, undefined) {
 })(window, window.document);
 
 module.exports = exports['default'];
-},{}],227:[function(require,module,exports){
+},{}],263:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -60246,7 +63433,7 @@ exports['default'] = {
 
 };
 module.exports = exports['default'];
-},{"react":380}],228:[function(require,module,exports){
+},{"react":416}],264:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -60282,7 +63469,7 @@ function shallowEqual(objA, objB) {
 }
 
 module.exports = exports['default'];
-},{}],229:[function(require,module,exports){
+},{}],265:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -60404,7 +63591,7 @@ exports['default'] = {
 };
 module.exports = exports['default'];
 }).call(this,require('_process'))
-},{"../styles/auto-prefix":153,"../utils/immutability-helper":221,"_process":232}],230:[function(require,module,exports){
+},{"../styles/auto-prefix":189,"../utils/immutability-helper":257,"_process":268}],266:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, '__esModule', {
@@ -60418,7 +63605,7 @@ exports['default'] = {
   }
 };
 module.exports = exports['default'];
-},{}],231:[function(require,module,exports){
+},{}],267:[function(require,module,exports){
 //! moment.js
 //! version : 2.10.6
 //! authors : Tim Wood, Iskren Chernev, Moment.js contributors
@@ -63614,7 +66801,7 @@ module.exports = exports['default'];
     return _moment;
 
 }));
-},{}],232:[function(require,module,exports){
+},{}],268:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -63707,24 +66894,24 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],233:[function(require,module,exports){
+},{}],269:[function(require,module,exports){
 module.exports = require('react/lib/ReactFragment').create;
-},{"react/lib/ReactFragment":304}],234:[function(require,module,exports){
+},{"react/lib/ReactFragment":340}],270:[function(require,module,exports){
 module.exports = require('react/lib/ReactCSSTransitionGroup');
-},{"react/lib/ReactCSSTransitionGroup":269}],235:[function(require,module,exports){
+},{"react/lib/ReactCSSTransitionGroup":305}],271:[function(require,module,exports){
 module.exports = require('react/lib/ReactComponentWithPureRenderMixin');
-},{"react/lib/ReactComponentWithPureRenderMixin":277}],236:[function(require,module,exports){
+},{"react/lib/ReactComponentWithPureRenderMixin":313}],272:[function(require,module,exports){
 module.exports = require('react/lib/ReactTransitionGroup');
-},{"react/lib/ReactTransitionGroup":330}],237:[function(require,module,exports){
+},{"react/lib/ReactTransitionGroup":366}],273:[function(require,module,exports){
 module.exports = require('react/lib/update');
-},{"react/lib/update":378}],238:[function(require,module,exports){
+},{"react/lib/update":414}],274:[function(require,module,exports){
 'use strict';
 
 module.exports = require('react/lib/ReactDOM');
 
-},{"react/lib/ReactDOM":280}],239:[function(require,module,exports){
-arguments[4][23][0].apply(exports,arguments)
-},{"dup":23}],240:[function(require,module,exports){
+},{"react/lib/ReactDOM":316}],275:[function(require,module,exports){
+arguments[4][59][0].apply(exports,arguments)
+},{"dup":59}],276:[function(require,module,exports){
 /**
  * Copyright 2013-2014 Facebook, Inc.
  *
@@ -63895,7 +67082,7 @@ var TapEventPlugin = {
 
 module.exports = TapEventPlugin;
 
-},{"./TouchEventUtils":241,"fbjs/lib/keyOf":239,"react/lib/EventConstants":256,"react/lib/EventPluginUtils":259,"react/lib/EventPropagators":260,"react/lib/SyntheticUIEvent":347,"react/lib/ViewportMetrics":350}],241:[function(require,module,exports){
+},{"./TouchEventUtils":277,"fbjs/lib/keyOf":275,"react/lib/EventConstants":292,"react/lib/EventPluginUtils":295,"react/lib/EventPropagators":296,"react/lib/SyntheticUIEvent":383,"react/lib/ViewportMetrics":386}],277:[function(require,module,exports){
 /**
  * Copyright 2013-2014 Facebook, Inc.
  *
@@ -63939,14 +67126,14 @@ var TouchEventUtils = {
 
 module.exports = TouchEventUtils;
 
-},{}],242:[function(require,module,exports){
+},{}],278:[function(require,module,exports){
 module.exports = function injectTapEventPlugin () {
   require('react/lib/EventPluginHub').injection.injectEventPluginsByName({
     "TapEventPlugin":       require('./TapEventPlugin.js')
   });
 };
 
-},{"./TapEventPlugin.js":240,"react/lib/EventPluginHub":257}],243:[function(require,module,exports){
+},{"./TapEventPlugin.js":276,"react/lib/EventPluginHub":293}],279:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -63983,7 +67170,7 @@ var AutoFocusUtils = {
 };
 
 module.exports = AutoFocusUtils;
-},{"./ReactMount":311,"./findDOMNode":357,"fbjs/lib/focusNode":13}],244:[function(require,module,exports){
+},{"./ReactMount":347,"./findDOMNode":393,"fbjs/lib/focusNode":49}],280:[function(require,module,exports){
 /**
  * Copyright 2013-2015 Facebook, Inc.
  * All rights reserved.
@@ -64389,7 +67576,7 @@ var BeforeInputEventPlugin = {
 };
 
 module.exports = BeforeInputEventPlugin;
-},{"./EventConstants":256,"./EventPropagators":260,"./FallbackCompositionState":261,"./SyntheticCompositionEvent":339,"./SyntheticInputEvent":343,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/keyOf":23}],245:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPropagators":296,"./FallbackCompositionState":297,"./SyntheticCompositionEvent":375,"./SyntheticInputEvent":379,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/keyOf":59}],281:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -64529,7 +67716,7 @@ var CSSProperty = {
 };
 
 module.exports = CSSProperty;
-},{}],246:[function(require,module,exports){
+},{}],282:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -64707,7 +67894,7 @@ ReactPerf.measureMethods(CSSPropertyOperations, 'CSSPropertyOperations', {
 
 module.exports = CSSPropertyOperations;
 }).call(this,require('_process'))
-},{"./CSSProperty":245,"./ReactPerf":317,"./dangerousStyleValue":354,"_process":232,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/camelizeStyleName":7,"fbjs/lib/hyphenateStyleName":18,"fbjs/lib/memoizeStringOnly":25,"fbjs/lib/warning":30}],247:[function(require,module,exports){
+},{"./CSSProperty":281,"./ReactPerf":353,"./dangerousStyleValue":390,"_process":268,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/camelizeStyleName":43,"fbjs/lib/hyphenateStyleName":54,"fbjs/lib/memoizeStringOnly":61,"fbjs/lib/warning":66}],283:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -64803,7 +67990,7 @@ PooledClass.addPoolingTo(CallbackQueue);
 
 module.exports = CallbackQueue;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./PooledClass":265,"_process":232,"fbjs/lib/invariant":19}],248:[function(require,module,exports){
+},{"./Object.assign":300,"./PooledClass":301,"_process":268,"fbjs/lib/invariant":55}],284:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -65125,7 +68312,7 @@ var ChangeEventPlugin = {
 };
 
 module.exports = ChangeEventPlugin;
-},{"./EventConstants":256,"./EventPluginHub":257,"./EventPropagators":260,"./ReactUpdates":332,"./SyntheticEvent":341,"./getEventTarget":363,"./isEventSupported":368,"./isTextInputElement":369,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/keyOf":23}],249:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPluginHub":293,"./EventPropagators":296,"./ReactUpdates":368,"./SyntheticEvent":377,"./getEventTarget":399,"./isEventSupported":404,"./isTextInputElement":405,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/keyOf":59}],285:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -65149,7 +68336,7 @@ var ClientReactRootIndex = {
 };
 
 module.exports = ClientReactRootIndex;
-},{}],250:[function(require,module,exports){
+},{}],286:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -65281,7 +68468,7 @@ ReactPerf.measureMethods(DOMChildrenOperations, 'DOMChildrenOperations', {
 
 module.exports = DOMChildrenOperations;
 }).call(this,require('_process'))
-},{"./Danger":253,"./ReactMultiChildUpdateTypes":313,"./ReactPerf":317,"./setInnerHTML":373,"./setTextContent":374,"_process":232,"fbjs/lib/invariant":19}],251:[function(require,module,exports){
+},{"./Danger":289,"./ReactMultiChildUpdateTypes":349,"./ReactPerf":353,"./setInnerHTML":409,"./setTextContent":410,"_process":268,"fbjs/lib/invariant":55}],287:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -65518,7 +68705,7 @@ var DOMProperty = {
 
 module.exports = DOMProperty;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],252:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],288:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -65746,7 +68933,7 @@ ReactPerf.measureMethods(DOMPropertyOperations, 'DOMPropertyOperations', {
 
 module.exports = DOMPropertyOperations;
 }).call(this,require('_process'))
-},{"./DOMProperty":251,"./ReactPerf":317,"./quoteAttributeValueForBrowser":371,"_process":232,"fbjs/lib/warning":30}],253:[function(require,module,exports){
+},{"./DOMProperty":287,"./ReactPerf":353,"./quoteAttributeValueForBrowser":407,"_process":268,"fbjs/lib/warning":66}],289:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -65894,7 +69081,7 @@ var Danger = {
 
 module.exports = Danger;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/createNodesFromMarkup":10,"fbjs/lib/emptyFunction":11,"fbjs/lib/getMarkupWrap":15,"fbjs/lib/invariant":19}],254:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/createNodesFromMarkup":46,"fbjs/lib/emptyFunction":47,"fbjs/lib/getMarkupWrap":51,"fbjs/lib/invariant":55}],290:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -65922,7 +69109,7 @@ var keyOf = require('fbjs/lib/keyOf');
 var DefaultEventPluginOrder = [keyOf({ ResponderEventPlugin: null }), keyOf({ SimpleEventPlugin: null }), keyOf({ TapEventPlugin: null }), keyOf({ EnterLeaveEventPlugin: null }), keyOf({ ChangeEventPlugin: null }), keyOf({ SelectEventPlugin: null }), keyOf({ BeforeInputEventPlugin: null })];
 
 module.exports = DefaultEventPluginOrder;
-},{"fbjs/lib/keyOf":23}],255:[function(require,module,exports){
+},{"fbjs/lib/keyOf":59}],291:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -66047,7 +69234,7 @@ var EnterLeaveEventPlugin = {
 };
 
 module.exports = EnterLeaveEventPlugin;
-},{"./EventConstants":256,"./EventPropagators":260,"./ReactMount":311,"./SyntheticMouseEvent":345,"fbjs/lib/keyOf":23}],256:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPropagators":296,"./ReactMount":347,"./SyntheticMouseEvent":381,"fbjs/lib/keyOf":59}],292:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -66140,7 +69327,7 @@ var EventConstants = {
 };
 
 module.exports = EventConstants;
-},{"fbjs/lib/keyMirror":22}],257:[function(require,module,exports){
+},{"fbjs/lib/keyMirror":58}],293:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -66422,7 +69609,7 @@ var EventPluginHub = {
 
 module.exports = EventPluginHub;
 }).call(this,require('_process'))
-},{"./EventPluginRegistry":258,"./EventPluginUtils":259,"./ReactErrorUtils":301,"./accumulateInto":351,"./forEachAccumulated":359,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],258:[function(require,module,exports){
+},{"./EventPluginRegistry":294,"./EventPluginUtils":295,"./ReactErrorUtils":337,"./accumulateInto":387,"./forEachAccumulated":395,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],294:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -66645,7 +69832,7 @@ var EventPluginRegistry = {
 
 module.exports = EventPluginRegistry;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],259:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],295:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -66850,7 +70037,7 @@ var EventPluginUtils = {
 
 module.exports = EventPluginUtils;
 }).call(this,require('_process'))
-},{"./EventConstants":256,"./ReactErrorUtils":301,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],260:[function(require,module,exports){
+},{"./EventConstants":292,"./ReactErrorUtils":337,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],296:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -66988,7 +70175,7 @@ var EventPropagators = {
 
 module.exports = EventPropagators;
 }).call(this,require('_process'))
-},{"./EventConstants":256,"./EventPluginHub":257,"./accumulateInto":351,"./forEachAccumulated":359,"_process":232,"fbjs/lib/warning":30}],261:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPluginHub":293,"./accumulateInto":387,"./forEachAccumulated":395,"_process":268,"fbjs/lib/warning":66}],297:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -67084,7 +70271,7 @@ assign(FallbackCompositionState.prototype, {
 PooledClass.addPoolingTo(FallbackCompositionState);
 
 module.exports = FallbackCompositionState;
-},{"./Object.assign":264,"./PooledClass":265,"./getTextContentAccessor":366}],262:[function(require,module,exports){
+},{"./Object.assign":300,"./PooledClass":301,"./getTextContentAccessor":402}],298:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -67317,7 +70504,7 @@ var HTMLDOMPropertyConfig = {
 };
 
 module.exports = HTMLDOMPropertyConfig;
-},{"./DOMProperty":251,"fbjs/lib/ExecutionEnvironment":5}],263:[function(require,module,exports){
+},{"./DOMProperty":287,"fbjs/lib/ExecutionEnvironment":41}],299:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -67454,7 +70641,7 @@ var LinkedValueUtils = {
 
 module.exports = LinkedValueUtils;
 }).call(this,require('_process'))
-},{"./ReactPropTypeLocations":319,"./ReactPropTypes":320,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],264:[function(require,module,exports){
+},{"./ReactPropTypeLocations":355,"./ReactPropTypes":356,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],300:[function(require,module,exports){
 /**
  * Copyright 2014-2015, Facebook, Inc.
  * All rights reserved.
@@ -67502,7 +70689,7 @@ function assign(target, sources) {
 }
 
 module.exports = assign;
-},{}],265:[function(require,module,exports){
+},{}],301:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -67624,7 +70811,7 @@ var PooledClass = {
 
 module.exports = PooledClass;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],266:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],302:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -67665,7 +70852,7 @@ React.__SECRET_DOM_DO_NOT_USE_OR_YOU_WILL_BE_FIRED = ReactDOM;
 React.__SECRET_DOM_SERVER_DO_NOT_USE_OR_YOU_WILL_BE_FIRED = ReactDOMServer;
 
 module.exports = React;
-},{"./Object.assign":264,"./ReactDOM":280,"./ReactDOMServer":290,"./ReactIsomorphic":309,"./deprecated":355}],267:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactDOM":316,"./ReactDOMServer":326,"./ReactIsomorphic":345,"./deprecated":391}],303:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -67704,7 +70891,7 @@ var ReactBrowserComponentMixin = {
 
 module.exports = ReactBrowserComponentMixin;
 }).call(this,require('_process'))
-},{"./ReactInstanceMap":308,"./findDOMNode":357,"_process":232,"fbjs/lib/warning":30}],268:[function(require,module,exports){
+},{"./ReactInstanceMap":344,"./findDOMNode":393,"_process":268,"fbjs/lib/warning":66}],304:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -68029,7 +71216,7 @@ ReactPerf.measureMethods(ReactBrowserEventEmitter, 'ReactBrowserEventEmitter', {
 });
 
 module.exports = ReactBrowserEventEmitter;
-},{"./EventConstants":256,"./EventPluginHub":257,"./EventPluginRegistry":258,"./Object.assign":264,"./ReactEventEmitterMixin":302,"./ReactPerf":317,"./ViewportMetrics":350,"./isEventSupported":368}],269:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPluginHub":293,"./EventPluginRegistry":294,"./Object.assign":300,"./ReactEventEmitterMixin":338,"./ReactPerf":353,"./ViewportMetrics":386,"./isEventSupported":404}],305:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -68113,7 +71300,7 @@ var ReactCSSTransitionGroup = React.createClass({
 });
 
 module.exports = ReactCSSTransitionGroup;
-},{"./Object.assign":264,"./React":266,"./ReactCSSTransitionGroupChild":270,"./ReactTransitionGroup":330}],270:[function(require,module,exports){
+},{"./Object.assign":300,"./React":302,"./ReactCSSTransitionGroupChild":306,"./ReactTransitionGroup":366}],306:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -68279,7 +71466,7 @@ var ReactCSSTransitionGroupChild = React.createClass({
 });
 
 module.exports = ReactCSSTransitionGroupChild;
-},{"./React":266,"./ReactDOM":280,"./ReactTransitionEvents":329,"./onlyChild":370,"fbjs/lib/CSSCore":3}],271:[function(require,module,exports){
+},{"./React":302,"./ReactDOM":316,"./ReactTransitionEvents":365,"./onlyChild":406,"fbjs/lib/CSSCore":39}],307:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -68404,7 +71591,7 @@ var ReactChildReconciler = {
 
 module.exports = ReactChildReconciler;
 }).call(this,require('_process'))
-},{"./ReactReconciler":322,"./instantiateReactComponent":367,"./shouldUpdateReactComponent":376,"./traverseAllChildren":377,"_process":232,"fbjs/lib/warning":30}],272:[function(require,module,exports){
+},{"./ReactReconciler":358,"./instantiateReactComponent":403,"./shouldUpdateReactComponent":412,"./traverseAllChildren":413,"_process":268,"fbjs/lib/warning":66}],308:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -68587,7 +71774,7 @@ var ReactChildren = {
 };
 
 module.exports = ReactChildren;
-},{"./PooledClass":265,"./ReactElement":297,"./traverseAllChildren":377,"fbjs/lib/emptyFunction":11}],273:[function(require,module,exports){
+},{"./PooledClass":301,"./ReactElement":333,"./traverseAllChildren":413,"fbjs/lib/emptyFunction":47}],309:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -69361,7 +72548,7 @@ var ReactClass = {
 
 module.exports = ReactClass;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactComponent":274,"./ReactElement":297,"./ReactNoopUpdateQueue":315,"./ReactPropTypeLocationNames":318,"./ReactPropTypeLocations":319,"_process":232,"fbjs/lib/emptyObject":12,"fbjs/lib/invariant":19,"fbjs/lib/keyMirror":22,"fbjs/lib/keyOf":23,"fbjs/lib/warning":30}],274:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactComponent":310,"./ReactElement":333,"./ReactNoopUpdateQueue":351,"./ReactPropTypeLocationNames":354,"./ReactPropTypeLocations":355,"_process":268,"fbjs/lib/emptyObject":48,"fbjs/lib/invariant":55,"fbjs/lib/keyMirror":58,"fbjs/lib/keyOf":59,"fbjs/lib/warning":66}],310:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -69486,7 +72673,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = ReactComponent;
 }).call(this,require('_process'))
-},{"./ReactNoopUpdateQueue":315,"./canDefineProperty":353,"_process":232,"fbjs/lib/emptyObject":12,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],275:[function(require,module,exports){
+},{"./ReactNoopUpdateQueue":351,"./canDefineProperty":389,"_process":268,"fbjs/lib/emptyObject":48,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],311:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -69528,7 +72715,7 @@ var ReactComponentBrowserEnvironment = {
 };
 
 module.exports = ReactComponentBrowserEnvironment;
-},{"./ReactDOMIDOperations":285,"./ReactMount":311}],276:[function(require,module,exports){
+},{"./ReactDOMIDOperations":321,"./ReactMount":347}],312:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -69582,7 +72769,7 @@ var ReactComponentEnvironment = {
 
 module.exports = ReactComponentEnvironment;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],277:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],313:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -69629,7 +72816,7 @@ var ReactComponentWithPureRenderMixin = {
 };
 
 module.exports = ReactComponentWithPureRenderMixin;
-},{"./shallowCompare":375}],278:[function(require,module,exports){
+},{"./shallowCompare":411}],314:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -70326,7 +73513,7 @@ var ReactCompositeComponent = {
 
 module.exports = ReactCompositeComponent;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactComponentEnvironment":276,"./ReactCurrentOwner":279,"./ReactElement":297,"./ReactInstanceMap":308,"./ReactPerf":317,"./ReactPropTypeLocationNames":318,"./ReactPropTypeLocations":319,"./ReactReconciler":322,"./ReactUpdateQueue":331,"./shouldUpdateReactComponent":376,"_process":232,"fbjs/lib/emptyObject":12,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],279:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactComponentEnvironment":312,"./ReactCurrentOwner":315,"./ReactElement":333,"./ReactInstanceMap":344,"./ReactPerf":353,"./ReactPropTypeLocationNames":354,"./ReactPropTypeLocations":355,"./ReactReconciler":358,"./ReactUpdateQueue":367,"./shouldUpdateReactComponent":412,"_process":268,"fbjs/lib/emptyObject":48,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],315:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -70357,7 +73544,7 @@ var ReactCurrentOwner = {
 };
 
 module.exports = ReactCurrentOwner;
-},{}],280:[function(require,module,exports){
+},{}],316:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -70452,7 +73639,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = React;
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":279,"./ReactDOMTextComponent":291,"./ReactDefaultInjection":294,"./ReactInstanceHandles":307,"./ReactMount":311,"./ReactPerf":317,"./ReactReconciler":322,"./ReactUpdates":332,"./ReactVersion":333,"./findDOMNode":357,"./renderSubtreeIntoContainer":372,"_process":232,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/warning":30}],281:[function(require,module,exports){
+},{"./ReactCurrentOwner":315,"./ReactDOMTextComponent":327,"./ReactDefaultInjection":330,"./ReactInstanceHandles":343,"./ReactMount":347,"./ReactPerf":353,"./ReactReconciler":358,"./ReactUpdates":368,"./ReactVersion":369,"./findDOMNode":393,"./renderSubtreeIntoContainer":408,"_process":268,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/warning":66}],317:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -70503,7 +73690,7 @@ var ReactDOMButton = {
 };
 
 module.exports = ReactDOMButton;
-},{}],282:[function(require,module,exports){
+},{}],318:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -71468,7 +74655,7 @@ assign(ReactDOMComponent.prototype, ReactDOMComponent.Mixin, ReactMultiChild.Mix
 
 module.exports = ReactDOMComponent;
 }).call(this,require('_process'))
-},{"./AutoFocusUtils":243,"./CSSPropertyOperations":246,"./DOMProperty":251,"./DOMPropertyOperations":252,"./EventConstants":256,"./Object.assign":264,"./ReactBrowserEventEmitter":268,"./ReactComponentBrowserEnvironment":275,"./ReactDOMButton":281,"./ReactDOMInput":286,"./ReactDOMOption":287,"./ReactDOMSelect":288,"./ReactDOMTextarea":292,"./ReactMount":311,"./ReactMultiChild":312,"./ReactPerf":317,"./ReactUpdateQueue":331,"./canDefineProperty":353,"./escapeTextContentForBrowser":356,"./isEventSupported":368,"./setInnerHTML":373,"./setTextContent":374,"./validateDOMNesting":379,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/keyOf":23,"fbjs/lib/shallowEqual":28,"fbjs/lib/warning":30}],283:[function(require,module,exports){
+},{"./AutoFocusUtils":279,"./CSSPropertyOperations":282,"./DOMProperty":287,"./DOMPropertyOperations":288,"./EventConstants":292,"./Object.assign":300,"./ReactBrowserEventEmitter":304,"./ReactComponentBrowserEnvironment":311,"./ReactDOMButton":317,"./ReactDOMInput":322,"./ReactDOMOption":323,"./ReactDOMSelect":324,"./ReactDOMTextarea":328,"./ReactMount":347,"./ReactMultiChild":348,"./ReactPerf":353,"./ReactUpdateQueue":367,"./canDefineProperty":389,"./escapeTextContentForBrowser":392,"./isEventSupported":404,"./setInnerHTML":409,"./setTextContent":410,"./validateDOMNesting":415,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/keyOf":59,"fbjs/lib/shallowEqual":64,"fbjs/lib/warning":66}],319:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -71648,7 +74835,7 @@ var ReactDOMFactories = mapObject({
 
 module.exports = ReactDOMFactories;
 }).call(this,require('_process'))
-},{"./ReactElement":297,"./ReactElementValidator":298,"_process":232,"fbjs/lib/mapObject":24}],284:[function(require,module,exports){
+},{"./ReactElement":333,"./ReactElementValidator":334,"_process":268,"fbjs/lib/mapObject":60}],320:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -71667,7 +74854,7 @@ var ReactDOMFeatureFlags = {
 };
 
 module.exports = ReactDOMFeatureFlags;
-},{}],285:[function(require,module,exports){
+},{}],321:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -71764,7 +74951,7 @@ ReactPerf.measureMethods(ReactDOMIDOperations, 'ReactDOMIDOperations', {
 
 module.exports = ReactDOMIDOperations;
 }).call(this,require('_process'))
-},{"./DOMChildrenOperations":250,"./DOMPropertyOperations":252,"./ReactMount":311,"./ReactPerf":317,"_process":232,"fbjs/lib/invariant":19}],286:[function(require,module,exports){
+},{"./DOMChildrenOperations":286,"./DOMPropertyOperations":288,"./ReactMount":347,"./ReactPerf":353,"_process":268,"fbjs/lib/invariant":55}],322:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -71920,7 +75107,7 @@ function _handleChange(event) {
 
 module.exports = ReactDOMInput;
 }).call(this,require('_process'))
-},{"./LinkedValueUtils":263,"./Object.assign":264,"./ReactDOMIDOperations":285,"./ReactMount":311,"./ReactUpdates":332,"_process":232,"fbjs/lib/invariant":19}],287:[function(require,module,exports){
+},{"./LinkedValueUtils":299,"./Object.assign":300,"./ReactDOMIDOperations":321,"./ReactMount":347,"./ReactUpdates":368,"_process":268,"fbjs/lib/invariant":55}],323:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -72009,7 +75196,7 @@ var ReactDOMOption = {
 
 module.exports = ReactDOMOption;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactChildren":272,"./ReactDOMSelect":288,"_process":232,"fbjs/lib/warning":30}],288:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactChildren":308,"./ReactDOMSelect":324,"_process":268,"fbjs/lib/warning":66}],324:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -72200,7 +75387,7 @@ function _handleChange(event) {
 
 module.exports = ReactDOMSelect;
 }).call(this,require('_process'))
-},{"./LinkedValueUtils":263,"./Object.assign":264,"./ReactMount":311,"./ReactUpdates":332,"_process":232,"fbjs/lib/warning":30}],289:[function(require,module,exports){
+},{"./LinkedValueUtils":299,"./Object.assign":300,"./ReactMount":347,"./ReactUpdates":368,"_process":268,"fbjs/lib/warning":66}],325:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -72413,7 +75600,7 @@ var ReactDOMSelection = {
 };
 
 module.exports = ReactDOMSelection;
-},{"./getNodeForCharacterOffset":365,"./getTextContentAccessor":366,"fbjs/lib/ExecutionEnvironment":5}],290:[function(require,module,exports){
+},{"./getNodeForCharacterOffset":401,"./getTextContentAccessor":402,"fbjs/lib/ExecutionEnvironment":41}],326:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -72440,7 +75627,7 @@ var ReactDOMServer = {
 };
 
 module.exports = ReactDOMServer;
-},{"./ReactDefaultInjection":294,"./ReactServerRendering":326,"./ReactVersion":333}],291:[function(require,module,exports){
+},{"./ReactDefaultInjection":330,"./ReactServerRendering":362,"./ReactVersion":369}],327:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -72570,7 +75757,7 @@ assign(ReactDOMTextComponent.prototype, {
 
 module.exports = ReactDOMTextComponent;
 }).call(this,require('_process'))
-},{"./DOMChildrenOperations":250,"./DOMPropertyOperations":252,"./Object.assign":264,"./ReactComponentBrowserEnvironment":275,"./ReactMount":311,"./escapeTextContentForBrowser":356,"./setTextContent":374,"./validateDOMNesting":379,"_process":232}],292:[function(require,module,exports){
+},{"./DOMChildrenOperations":286,"./DOMPropertyOperations":288,"./Object.assign":300,"./ReactComponentBrowserEnvironment":311,"./ReactMount":347,"./escapeTextContentForBrowser":392,"./setTextContent":410,"./validateDOMNesting":415,"_process":268}],328:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -72686,7 +75873,7 @@ function _handleChange(event) {
 
 module.exports = ReactDOMTextarea;
 }).call(this,require('_process'))
-},{"./LinkedValueUtils":263,"./Object.assign":264,"./ReactDOMIDOperations":285,"./ReactUpdates":332,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],293:[function(require,module,exports){
+},{"./LinkedValueUtils":299,"./Object.assign":300,"./ReactDOMIDOperations":321,"./ReactUpdates":368,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],329:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -72754,7 +75941,7 @@ var ReactDefaultBatchingStrategy = {
 };
 
 module.exports = ReactDefaultBatchingStrategy;
-},{"./Object.assign":264,"./ReactUpdates":332,"./Transaction":349,"fbjs/lib/emptyFunction":11}],294:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactUpdates":368,"./Transaction":385,"fbjs/lib/emptyFunction":47}],330:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -72854,7 +76041,7 @@ module.exports = {
   inject: inject
 };
 }).call(this,require('_process'))
-},{"./BeforeInputEventPlugin":244,"./ChangeEventPlugin":248,"./ClientReactRootIndex":249,"./DefaultEventPluginOrder":254,"./EnterLeaveEventPlugin":255,"./HTMLDOMPropertyConfig":262,"./ReactBrowserComponentMixin":267,"./ReactComponentBrowserEnvironment":275,"./ReactDOMComponent":282,"./ReactDOMTextComponent":291,"./ReactDefaultBatchingStrategy":293,"./ReactDefaultPerf":295,"./ReactEventListener":303,"./ReactInjection":305,"./ReactInstanceHandles":307,"./ReactMount":311,"./ReactReconcileTransaction":321,"./SVGDOMPropertyConfig":334,"./SelectEventPlugin":335,"./ServerReactRootIndex":336,"./SimpleEventPlugin":337,"_process":232,"fbjs/lib/ExecutionEnvironment":5}],295:[function(require,module,exports){
+},{"./BeforeInputEventPlugin":280,"./ChangeEventPlugin":284,"./ClientReactRootIndex":285,"./DefaultEventPluginOrder":290,"./EnterLeaveEventPlugin":291,"./HTMLDOMPropertyConfig":298,"./ReactBrowserComponentMixin":303,"./ReactComponentBrowserEnvironment":311,"./ReactDOMComponent":318,"./ReactDOMTextComponent":327,"./ReactDefaultBatchingStrategy":329,"./ReactDefaultPerf":331,"./ReactEventListener":339,"./ReactInjection":341,"./ReactInstanceHandles":343,"./ReactMount":347,"./ReactReconcileTransaction":357,"./SVGDOMPropertyConfig":370,"./SelectEventPlugin":371,"./ServerReactRootIndex":372,"./SimpleEventPlugin":373,"_process":268,"fbjs/lib/ExecutionEnvironment":41}],331:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -73092,7 +76279,7 @@ var ReactDefaultPerf = {
 };
 
 module.exports = ReactDefaultPerf;
-},{"./DOMProperty":251,"./ReactDefaultPerfAnalysis":296,"./ReactMount":311,"./ReactPerf":317,"fbjs/lib/performanceNow":27}],296:[function(require,module,exports){
+},{"./DOMProperty":287,"./ReactDefaultPerfAnalysis":332,"./ReactMount":347,"./ReactPerf":353,"fbjs/lib/performanceNow":63}],332:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -73292,7 +76479,7 @@ var ReactDefaultPerfAnalysis = {
 };
 
 module.exports = ReactDefaultPerfAnalysis;
-},{"./Object.assign":264}],297:[function(require,module,exports){
+},{"./Object.assign":300}],333:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -73542,7 +76729,7 @@ ReactElement.isValidElement = function (object) {
 
 module.exports = ReactElement;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactCurrentOwner":279,"./canDefineProperty":353,"_process":232}],298:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactCurrentOwner":315,"./canDefineProperty":389,"_process":268}],334:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -73826,7 +77013,7 @@ var ReactElementValidator = {
 
 module.exports = ReactElementValidator;
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":279,"./ReactElement":297,"./ReactPropTypeLocationNames":318,"./ReactPropTypeLocations":319,"./canDefineProperty":353,"./getIteratorFn":364,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],299:[function(require,module,exports){
+},{"./ReactCurrentOwner":315,"./ReactElement":333,"./ReactPropTypeLocationNames":354,"./ReactPropTypeLocations":355,"./canDefineProperty":389,"./getIteratorFn":400,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],335:[function(require,module,exports){
 /**
  * Copyright 2014-2015, Facebook, Inc.
  * All rights reserved.
@@ -73878,7 +77065,7 @@ assign(ReactEmptyComponent.prototype, {
 ReactEmptyComponent.injection = ReactEmptyComponentInjection;
 
 module.exports = ReactEmptyComponent;
-},{"./Object.assign":264,"./ReactElement":297,"./ReactEmptyComponentRegistry":300,"./ReactReconciler":322}],300:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactElement":333,"./ReactEmptyComponentRegistry":336,"./ReactReconciler":358}],336:[function(require,module,exports){
 /**
  * Copyright 2014-2015, Facebook, Inc.
  * All rights reserved.
@@ -73927,7 +77114,7 @@ var ReactEmptyComponentRegistry = {
 };
 
 module.exports = ReactEmptyComponentRegistry;
-},{}],301:[function(require,module,exports){
+},{}],337:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -74007,7 +77194,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = ReactErrorUtils;
 }).call(this,require('_process'))
-},{"_process":232}],302:[function(require,module,exports){
+},{"_process":268}],338:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74046,7 +77233,7 @@ var ReactEventEmitterMixin = {
 };
 
 module.exports = ReactEventEmitterMixin;
-},{"./EventPluginHub":257}],303:[function(require,module,exports){
+},{"./EventPluginHub":293}],339:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74258,7 +77445,7 @@ var ReactEventListener = {
 };
 
 module.exports = ReactEventListener;
-},{"./Object.assign":264,"./PooledClass":265,"./ReactInstanceHandles":307,"./ReactMount":311,"./ReactUpdates":332,"./getEventTarget":363,"fbjs/lib/EventListener":4,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/getUnboundedScrollPosition":16}],304:[function(require,module,exports){
+},{"./Object.assign":300,"./PooledClass":301,"./ReactInstanceHandles":343,"./ReactMount":347,"./ReactUpdates":368,"./getEventTarget":399,"fbjs/lib/EventListener":40,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/getUnboundedScrollPosition":52}],340:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2015, Facebook, Inc.
@@ -74325,7 +77512,7 @@ var ReactFragment = {
 
 module.exports = ReactFragment;
 }).call(this,require('_process'))
-},{"./ReactChildren":272,"./ReactElement":297,"_process":232,"fbjs/lib/emptyFunction":11,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],305:[function(require,module,exports){
+},{"./ReactChildren":308,"./ReactElement":333,"_process":268,"fbjs/lib/emptyFunction":47,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],341:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74364,7 +77551,7 @@ var ReactInjection = {
 };
 
 module.exports = ReactInjection;
-},{"./DOMProperty":251,"./EventPluginHub":257,"./ReactBrowserEventEmitter":268,"./ReactClass":273,"./ReactComponentEnvironment":276,"./ReactEmptyComponent":299,"./ReactNativeComponent":314,"./ReactPerf":317,"./ReactRootIndex":324,"./ReactUpdates":332}],306:[function(require,module,exports){
+},{"./DOMProperty":287,"./EventPluginHub":293,"./ReactBrowserEventEmitter":304,"./ReactClass":309,"./ReactComponentEnvironment":312,"./ReactEmptyComponent":335,"./ReactNativeComponent":350,"./ReactPerf":353,"./ReactRootIndex":360,"./ReactUpdates":368}],342:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74489,7 +77676,7 @@ var ReactInputSelection = {
 };
 
 module.exports = ReactInputSelection;
-},{"./ReactDOMSelection":289,"fbjs/lib/containsNode":8,"fbjs/lib/focusNode":13,"fbjs/lib/getActiveElement":14}],307:[function(require,module,exports){
+},{"./ReactDOMSelection":325,"fbjs/lib/containsNode":44,"fbjs/lib/focusNode":49,"fbjs/lib/getActiveElement":50}],343:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -74794,7 +77981,7 @@ var ReactInstanceHandles = {
 
 module.exports = ReactInstanceHandles;
 }).call(this,require('_process'))
-},{"./ReactRootIndex":324,"_process":232,"fbjs/lib/invariant":19}],308:[function(require,module,exports){
+},{"./ReactRootIndex":360,"_process":268,"fbjs/lib/invariant":55}],344:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74842,7 +78029,7 @@ var ReactInstanceMap = {
 };
 
 module.exports = ReactInstanceMap;
-},{}],309:[function(require,module,exports){
+},{}],345:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -74919,7 +78106,7 @@ var React = {
 
 module.exports = React;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactChildren":272,"./ReactClass":273,"./ReactComponent":274,"./ReactDOMFactories":283,"./ReactElement":297,"./ReactElementValidator":298,"./ReactPropTypes":320,"./ReactVersion":333,"./onlyChild":370,"_process":232}],310:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactChildren":308,"./ReactClass":309,"./ReactComponent":310,"./ReactDOMFactories":319,"./ReactElement":333,"./ReactElementValidator":334,"./ReactPropTypes":356,"./ReactVersion":369,"./onlyChild":406,"_process":268}],346:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -74965,7 +78152,7 @@ var ReactMarkupChecksum = {
 };
 
 module.exports = ReactMarkupChecksum;
-},{"./adler32":352}],311:[function(require,module,exports){
+},{"./adler32":388}],347:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -75818,7 +79005,7 @@ ReactPerf.measureMethods(ReactMount, 'ReactMount', {
 
 module.exports = ReactMount;
 }).call(this,require('_process'))
-},{"./DOMProperty":251,"./Object.assign":264,"./ReactBrowserEventEmitter":268,"./ReactCurrentOwner":279,"./ReactDOMFeatureFlags":284,"./ReactElement":297,"./ReactEmptyComponentRegistry":300,"./ReactInstanceHandles":307,"./ReactInstanceMap":308,"./ReactMarkupChecksum":310,"./ReactPerf":317,"./ReactReconciler":322,"./ReactUpdateQueue":331,"./ReactUpdates":332,"./instantiateReactComponent":367,"./setInnerHTML":373,"./shouldUpdateReactComponent":376,"./validateDOMNesting":379,"_process":232,"fbjs/lib/containsNode":8,"fbjs/lib/emptyObject":12,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],312:[function(require,module,exports){
+},{"./DOMProperty":287,"./Object.assign":300,"./ReactBrowserEventEmitter":304,"./ReactCurrentOwner":315,"./ReactDOMFeatureFlags":320,"./ReactElement":333,"./ReactEmptyComponentRegistry":336,"./ReactInstanceHandles":343,"./ReactInstanceMap":344,"./ReactMarkupChecksum":346,"./ReactPerf":353,"./ReactReconciler":358,"./ReactUpdateQueue":367,"./ReactUpdates":368,"./instantiateReactComponent":403,"./setInnerHTML":409,"./shouldUpdateReactComponent":412,"./validateDOMNesting":415,"_process":268,"fbjs/lib/containsNode":44,"fbjs/lib/emptyObject":48,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],348:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -76317,7 +79504,7 @@ var ReactMultiChild = {
 
 module.exports = ReactMultiChild;
 }).call(this,require('_process'))
-},{"./ReactChildReconciler":271,"./ReactComponentEnvironment":276,"./ReactCurrentOwner":279,"./ReactMultiChildUpdateTypes":313,"./ReactReconciler":322,"./flattenChildren":358,"_process":232}],313:[function(require,module,exports){
+},{"./ReactChildReconciler":307,"./ReactComponentEnvironment":312,"./ReactCurrentOwner":315,"./ReactMultiChildUpdateTypes":349,"./ReactReconciler":358,"./flattenChildren":394,"_process":268}],349:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -76350,7 +79537,7 @@ var ReactMultiChildUpdateTypes = keyMirror({
 });
 
 module.exports = ReactMultiChildUpdateTypes;
-},{"fbjs/lib/keyMirror":22}],314:[function(require,module,exports){
+},{"fbjs/lib/keyMirror":58}],350:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -76447,7 +79634,7 @@ var ReactNativeComponent = {
 
 module.exports = ReactNativeComponent;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"_process":232,"fbjs/lib/invariant":19}],315:[function(require,module,exports){
+},{"./Object.assign":300,"_process":268,"fbjs/lib/invariant":55}],351:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2015, Facebook, Inc.
@@ -76568,7 +79755,7 @@ var ReactNoopUpdateQueue = {
 
 module.exports = ReactNoopUpdateQueue;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/warning":30}],316:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/warning":66}],352:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -76662,7 +79849,7 @@ var ReactOwner = {
 
 module.exports = ReactOwner;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],317:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],353:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -76761,7 +79948,7 @@ function _noMeasure(objName, fnName, func) {
 
 module.exports = ReactPerf;
 }).call(this,require('_process'))
-},{"_process":232}],318:[function(require,module,exports){
+},{"_process":268}],354:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -76788,7 +79975,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = ReactPropTypeLocationNames;
 }).call(this,require('_process'))
-},{"_process":232}],319:[function(require,module,exports){
+},{"_process":268}],355:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -76811,7 +79998,7 @@ var ReactPropTypeLocations = keyMirror({
 });
 
 module.exports = ReactPropTypeLocations;
-},{"fbjs/lib/keyMirror":22}],320:[function(require,module,exports){
+},{"fbjs/lib/keyMirror":58}],356:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77168,7 +80355,7 @@ function getClassName(propValue) {
 }
 
 module.exports = ReactPropTypes;
-},{"./ReactElement":297,"./ReactPropTypeLocationNames":318,"./getIteratorFn":364,"fbjs/lib/emptyFunction":11}],321:[function(require,module,exports){
+},{"./ReactElement":333,"./ReactPropTypeLocationNames":354,"./getIteratorFn":400,"fbjs/lib/emptyFunction":47}],357:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77320,7 +80507,7 @@ assign(ReactReconcileTransaction.prototype, Transaction.Mixin, Mixin);
 PooledClass.addPoolingTo(ReactReconcileTransaction);
 
 module.exports = ReactReconcileTransaction;
-},{"./CallbackQueue":247,"./Object.assign":264,"./PooledClass":265,"./ReactBrowserEventEmitter":268,"./ReactDOMFeatureFlags":284,"./ReactInputSelection":306,"./Transaction":349}],322:[function(require,module,exports){
+},{"./CallbackQueue":283,"./Object.assign":300,"./PooledClass":301,"./ReactBrowserEventEmitter":304,"./ReactDOMFeatureFlags":320,"./ReactInputSelection":342,"./Transaction":385}],358:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77428,7 +80615,7 @@ var ReactReconciler = {
 };
 
 module.exports = ReactReconciler;
-},{"./ReactRef":323}],323:[function(require,module,exports){
+},{"./ReactRef":359}],359:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77507,7 +80694,7 @@ ReactRef.detachRefs = function (instance, element) {
 };
 
 module.exports = ReactRef;
-},{"./ReactOwner":316}],324:[function(require,module,exports){
+},{"./ReactOwner":352}],360:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77537,7 +80724,7 @@ var ReactRootIndex = {
 };
 
 module.exports = ReactRootIndex;
-},{}],325:[function(require,module,exports){
+},{}],361:[function(require,module,exports){
 /**
  * Copyright 2014-2015, Facebook, Inc.
  * All rights reserved.
@@ -77561,7 +80748,7 @@ var ReactServerBatchingStrategy = {
 };
 
 module.exports = ReactServerBatchingStrategy;
-},{}],326:[function(require,module,exports){
+},{}],362:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -77647,7 +80834,7 @@ module.exports = {
   renderToStaticMarkup: renderToStaticMarkup
 };
 }).call(this,require('_process'))
-},{"./ReactDefaultBatchingStrategy":293,"./ReactElement":297,"./ReactInstanceHandles":307,"./ReactMarkupChecksum":310,"./ReactServerBatchingStrategy":325,"./ReactServerRenderingTransaction":327,"./ReactUpdates":332,"./instantiateReactComponent":367,"_process":232,"fbjs/lib/emptyObject":12,"fbjs/lib/invariant":19}],327:[function(require,module,exports){
+},{"./ReactDefaultBatchingStrategy":329,"./ReactElement":333,"./ReactInstanceHandles":343,"./ReactMarkupChecksum":346,"./ReactServerBatchingStrategy":361,"./ReactServerRenderingTransaction":363,"./ReactUpdates":368,"./instantiateReactComponent":403,"_process":268,"fbjs/lib/emptyObject":48,"fbjs/lib/invariant":55}],363:[function(require,module,exports){
 /**
  * Copyright 2014-2015, Facebook, Inc.
  * All rights reserved.
@@ -77735,7 +80922,7 @@ assign(ReactServerRenderingTransaction.prototype, Transaction.Mixin, Mixin);
 PooledClass.addPoolingTo(ReactServerRenderingTransaction);
 
 module.exports = ReactServerRenderingTransaction;
-},{"./CallbackQueue":247,"./Object.assign":264,"./PooledClass":265,"./Transaction":349,"fbjs/lib/emptyFunction":11}],328:[function(require,module,exports){
+},{"./CallbackQueue":283,"./Object.assign":300,"./PooledClass":301,"./Transaction":385,"fbjs/lib/emptyFunction":47}],364:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77834,7 +81021,7 @@ var ReactTransitionChildMapping = {
 };
 
 module.exports = ReactTransitionChildMapping;
-},{"./flattenChildren":358}],329:[function(require,module,exports){
+},{"./flattenChildren":394}],365:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -77944,7 +81131,7 @@ var ReactTransitionEvents = {
 };
 
 module.exports = ReactTransitionEvents;
-},{"fbjs/lib/ExecutionEnvironment":5}],330:[function(require,module,exports){
+},{"fbjs/lib/ExecutionEnvironment":41}],366:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -78150,7 +81337,7 @@ var ReactTransitionGroup = React.createClass({
 });
 
 module.exports = ReactTransitionGroup;
-},{"./Object.assign":264,"./React":266,"./ReactTransitionChildMapping":328,"fbjs/lib/emptyFunction":11}],331:[function(require,module,exports){
+},{"./Object.assign":300,"./React":302,"./ReactTransitionChildMapping":364,"fbjs/lib/emptyFunction":47}],367:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2015, Facebook, Inc.
@@ -78410,7 +81597,7 @@ var ReactUpdateQueue = {
 
 module.exports = ReactUpdateQueue;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactCurrentOwner":279,"./ReactElement":297,"./ReactInstanceMap":308,"./ReactUpdates":332,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],332:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactCurrentOwner":315,"./ReactElement":333,"./ReactInstanceMap":344,"./ReactUpdates":368,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],368:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -78636,7 +81823,7 @@ var ReactUpdates = {
 
 module.exports = ReactUpdates;
 }).call(this,require('_process'))
-},{"./CallbackQueue":247,"./Object.assign":264,"./PooledClass":265,"./ReactPerf":317,"./ReactReconciler":322,"./Transaction":349,"_process":232,"fbjs/lib/invariant":19}],333:[function(require,module,exports){
+},{"./CallbackQueue":283,"./Object.assign":300,"./PooledClass":301,"./ReactPerf":353,"./ReactReconciler":358,"./Transaction":385,"_process":268,"fbjs/lib/invariant":55}],369:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -78651,7 +81838,7 @@ module.exports = ReactUpdates;
 'use strict';
 
 module.exports = '0.14.3';
-},{}],334:[function(require,module,exports){
+},{}],370:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -78779,7 +81966,7 @@ var SVGDOMPropertyConfig = {
 };
 
 module.exports = SVGDOMPropertyConfig;
-},{"./DOMProperty":251}],335:[function(require,module,exports){
+},{"./DOMProperty":287}],371:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -78981,7 +82168,7 @@ var SelectEventPlugin = {
 };
 
 module.exports = SelectEventPlugin;
-},{"./EventConstants":256,"./EventPropagators":260,"./ReactInputSelection":306,"./SyntheticEvent":341,"./isTextInputElement":369,"fbjs/lib/ExecutionEnvironment":5,"fbjs/lib/getActiveElement":14,"fbjs/lib/keyOf":23,"fbjs/lib/shallowEqual":28}],336:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPropagators":296,"./ReactInputSelection":342,"./SyntheticEvent":377,"./isTextInputElement":405,"fbjs/lib/ExecutionEnvironment":41,"fbjs/lib/getActiveElement":50,"fbjs/lib/keyOf":59,"fbjs/lib/shallowEqual":64}],372:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79011,7 +82198,7 @@ var ServerReactRootIndex = {
 };
 
 module.exports = ServerReactRootIndex;
-},{}],337:[function(require,module,exports){
+},{}],373:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -79601,7 +82788,7 @@ var SimpleEventPlugin = {
 
 module.exports = SimpleEventPlugin;
 }).call(this,require('_process'))
-},{"./EventConstants":256,"./EventPropagators":260,"./ReactMount":311,"./SyntheticClipboardEvent":338,"./SyntheticDragEvent":340,"./SyntheticEvent":341,"./SyntheticFocusEvent":342,"./SyntheticKeyboardEvent":344,"./SyntheticMouseEvent":345,"./SyntheticTouchEvent":346,"./SyntheticUIEvent":347,"./SyntheticWheelEvent":348,"./getEventCharCode":360,"_process":232,"fbjs/lib/EventListener":4,"fbjs/lib/emptyFunction":11,"fbjs/lib/invariant":19,"fbjs/lib/keyOf":23}],338:[function(require,module,exports){
+},{"./EventConstants":292,"./EventPropagators":296,"./ReactMount":347,"./SyntheticClipboardEvent":374,"./SyntheticDragEvent":376,"./SyntheticEvent":377,"./SyntheticFocusEvent":378,"./SyntheticKeyboardEvent":380,"./SyntheticMouseEvent":381,"./SyntheticTouchEvent":382,"./SyntheticUIEvent":383,"./SyntheticWheelEvent":384,"./getEventCharCode":396,"_process":268,"fbjs/lib/EventListener":40,"fbjs/lib/emptyFunction":47,"fbjs/lib/invariant":55,"fbjs/lib/keyOf":59}],374:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79641,7 +82828,7 @@ function SyntheticClipboardEvent(dispatchConfig, dispatchMarker, nativeEvent, na
 SyntheticEvent.augmentClass(SyntheticClipboardEvent, ClipboardEventInterface);
 
 module.exports = SyntheticClipboardEvent;
-},{"./SyntheticEvent":341}],339:[function(require,module,exports){
+},{"./SyntheticEvent":377}],375:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79679,7 +82866,7 @@ function SyntheticCompositionEvent(dispatchConfig, dispatchMarker, nativeEvent, 
 SyntheticEvent.augmentClass(SyntheticCompositionEvent, CompositionEventInterface);
 
 module.exports = SyntheticCompositionEvent;
-},{"./SyntheticEvent":341}],340:[function(require,module,exports){
+},{"./SyntheticEvent":377}],376:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79717,7 +82904,7 @@ function SyntheticDragEvent(dispatchConfig, dispatchMarker, nativeEvent, nativeE
 SyntheticMouseEvent.augmentClass(SyntheticDragEvent, DragEventInterface);
 
 module.exports = SyntheticDragEvent;
-},{"./SyntheticMouseEvent":345}],341:[function(require,module,exports){
+},{"./SyntheticMouseEvent":381}],377:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -79897,7 +83084,7 @@ PooledClass.addPoolingTo(SyntheticEvent, PooledClass.fourArgumentPooler);
 
 module.exports = SyntheticEvent;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./PooledClass":265,"_process":232,"fbjs/lib/emptyFunction":11,"fbjs/lib/warning":30}],342:[function(require,module,exports){
+},{"./Object.assign":300,"./PooledClass":301,"_process":268,"fbjs/lib/emptyFunction":47,"fbjs/lib/warning":66}],378:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79935,7 +83122,7 @@ function SyntheticFocusEvent(dispatchConfig, dispatchMarker, nativeEvent, native
 SyntheticUIEvent.augmentClass(SyntheticFocusEvent, FocusEventInterface);
 
 module.exports = SyntheticFocusEvent;
-},{"./SyntheticUIEvent":347}],343:[function(require,module,exports){
+},{"./SyntheticUIEvent":383}],379:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -79974,7 +83161,7 @@ function SyntheticInputEvent(dispatchConfig, dispatchMarker, nativeEvent, native
 SyntheticEvent.augmentClass(SyntheticInputEvent, InputEventInterface);
 
 module.exports = SyntheticInputEvent;
-},{"./SyntheticEvent":341}],344:[function(require,module,exports){
+},{"./SyntheticEvent":377}],380:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80060,7 +83247,7 @@ function SyntheticKeyboardEvent(dispatchConfig, dispatchMarker, nativeEvent, nat
 SyntheticUIEvent.augmentClass(SyntheticKeyboardEvent, KeyboardEventInterface);
 
 module.exports = SyntheticKeyboardEvent;
-},{"./SyntheticUIEvent":347,"./getEventCharCode":360,"./getEventKey":361,"./getEventModifierState":362}],345:[function(require,module,exports){
+},{"./SyntheticUIEvent":383,"./getEventCharCode":396,"./getEventKey":397,"./getEventModifierState":398}],381:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80134,7 +83321,7 @@ function SyntheticMouseEvent(dispatchConfig, dispatchMarker, nativeEvent, native
 SyntheticUIEvent.augmentClass(SyntheticMouseEvent, MouseEventInterface);
 
 module.exports = SyntheticMouseEvent;
-},{"./SyntheticUIEvent":347,"./ViewportMetrics":350,"./getEventModifierState":362}],346:[function(require,module,exports){
+},{"./SyntheticUIEvent":383,"./ViewportMetrics":386,"./getEventModifierState":398}],382:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80181,7 +83368,7 @@ function SyntheticTouchEvent(dispatchConfig, dispatchMarker, nativeEvent, native
 SyntheticUIEvent.augmentClass(SyntheticTouchEvent, TouchEventInterface);
 
 module.exports = SyntheticTouchEvent;
-},{"./SyntheticUIEvent":347,"./getEventModifierState":362}],347:[function(require,module,exports){
+},{"./SyntheticUIEvent":383,"./getEventModifierState":398}],383:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80242,7 +83429,7 @@ function SyntheticUIEvent(dispatchConfig, dispatchMarker, nativeEvent, nativeEve
 SyntheticEvent.augmentClass(SyntheticUIEvent, UIEventInterface);
 
 module.exports = SyntheticUIEvent;
-},{"./SyntheticEvent":341,"./getEventTarget":363}],348:[function(require,module,exports){
+},{"./SyntheticEvent":377,"./getEventTarget":399}],384:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80298,7 +83485,7 @@ function SyntheticWheelEvent(dispatchConfig, dispatchMarker, nativeEvent, native
 SyntheticMouseEvent.augmentClass(SyntheticWheelEvent, WheelEventInterface);
 
 module.exports = SyntheticWheelEvent;
-},{"./SyntheticMouseEvent":345}],349:[function(require,module,exports){
+},{"./SyntheticMouseEvent":381}],385:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -80532,7 +83719,7 @@ var Transaction = {
 
 module.exports = Transaction;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],350:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],386:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80560,7 +83747,7 @@ var ViewportMetrics = {
 };
 
 module.exports = ViewportMetrics;
-},{}],351:[function(require,module,exports){
+},{}],387:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -80622,7 +83809,7 @@ function accumulateInto(current, next) {
 
 module.exports = accumulateInto;
 }).call(this,require('_process'))
-},{"_process":232,"fbjs/lib/invariant":19}],352:[function(require,module,exports){
+},{"_process":268,"fbjs/lib/invariant":55}],388:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80665,7 +83852,7 @@ function adler32(data) {
 }
 
 module.exports = adler32;
-},{}],353:[function(require,module,exports){
+},{}],389:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -80692,7 +83879,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = canDefineProperty;
 }).call(this,require('_process'))
-},{"_process":232}],354:[function(require,module,exports){
+},{"_process":268}],390:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80748,7 +83935,7 @@ function dangerousStyleValue(name, value) {
 }
 
 module.exports = dangerousStyleValue;
-},{"./CSSProperty":245}],355:[function(require,module,exports){
+},{"./CSSProperty":281}],391:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -80799,7 +83986,7 @@ function deprecated(fnName, newModule, newPackage, ctx, fn) {
 
 module.exports = deprecated;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"_process":232,"fbjs/lib/warning":30}],356:[function(require,module,exports){
+},{"./Object.assign":300,"_process":268,"fbjs/lib/warning":66}],392:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80838,7 +84025,7 @@ function escapeTextContentForBrowser(text) {
 }
 
 module.exports = escapeTextContentForBrowser;
-},{}],357:[function(require,module,exports){
+},{}],393:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -80890,7 +84077,7 @@ function findDOMNode(componentOrElement) {
 
 module.exports = findDOMNode;
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":279,"./ReactInstanceMap":308,"./ReactMount":311,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],358:[function(require,module,exports){
+},{"./ReactCurrentOwner":315,"./ReactInstanceMap":344,"./ReactMount":347,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],394:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -80941,7 +84128,7 @@ function flattenChildren(children) {
 
 module.exports = flattenChildren;
 }).call(this,require('_process'))
-},{"./traverseAllChildren":377,"_process":232,"fbjs/lib/warning":30}],359:[function(require,module,exports){
+},{"./traverseAllChildren":413,"_process":268,"fbjs/lib/warning":66}],395:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -80971,7 +84158,7 @@ var forEachAccumulated = function (arr, cb, scope) {
 };
 
 module.exports = forEachAccumulated;
-},{}],360:[function(require,module,exports){
+},{}],396:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81022,7 +84209,7 @@ function getEventCharCode(nativeEvent) {
 }
 
 module.exports = getEventCharCode;
-},{}],361:[function(require,module,exports){
+},{}],397:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81126,7 +84313,7 @@ function getEventKey(nativeEvent) {
 }
 
 module.exports = getEventKey;
-},{"./getEventCharCode":360}],362:[function(require,module,exports){
+},{"./getEventCharCode":396}],398:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81171,7 +84358,7 @@ function getEventModifierState(nativeEvent) {
 }
 
 module.exports = getEventModifierState;
-},{}],363:[function(require,module,exports){
+},{}],399:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81201,7 +84388,7 @@ function getEventTarget(nativeEvent) {
 }
 
 module.exports = getEventTarget;
-},{}],364:[function(require,module,exports){
+},{}],400:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81242,7 +84429,7 @@ function getIteratorFn(maybeIterable) {
 }
 
 module.exports = getIteratorFn;
-},{}],365:[function(require,module,exports){
+},{}],401:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81316,7 +84503,7 @@ function getNodeForCharacterOffset(root, offset) {
 }
 
 module.exports = getNodeForCharacterOffset;
-},{}],366:[function(require,module,exports){
+},{}],402:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81350,7 +84537,7 @@ function getTextContentAccessor() {
 }
 
 module.exports = getTextContentAccessor;
-},{"fbjs/lib/ExecutionEnvironment":5}],367:[function(require,module,exports){
+},{"fbjs/lib/ExecutionEnvironment":41}],403:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -81465,7 +84652,7 @@ function instantiateReactComponent(node) {
 
 module.exports = instantiateReactComponent;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"./ReactCompositeComponent":278,"./ReactEmptyComponent":299,"./ReactNativeComponent":314,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],368:[function(require,module,exports){
+},{"./Object.assign":300,"./ReactCompositeComponent":314,"./ReactEmptyComponent":335,"./ReactNativeComponent":350,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],404:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81526,7 +84713,7 @@ function isEventSupported(eventNameSuffix, capture) {
 }
 
 module.exports = isEventSupported;
-},{"fbjs/lib/ExecutionEnvironment":5}],369:[function(require,module,exports){
+},{"fbjs/lib/ExecutionEnvironment":41}],405:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81567,7 +84754,7 @@ function isTextInputElement(elem) {
 }
 
 module.exports = isTextInputElement;
-},{}],370:[function(require,module,exports){
+},{}],406:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -81603,7 +84790,7 @@ function onlyChild(children) {
 
 module.exports = onlyChild;
 }).call(this,require('_process'))
-},{"./ReactElement":297,"_process":232,"fbjs/lib/invariant":19}],371:[function(require,module,exports){
+},{"./ReactElement":333,"_process":268,"fbjs/lib/invariant":55}],407:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81630,7 +84817,7 @@ function quoteAttributeValueForBrowser(value) {
 }
 
 module.exports = quoteAttributeValueForBrowser;
-},{"./escapeTextContentForBrowser":356}],372:[function(require,module,exports){
+},{"./escapeTextContentForBrowser":392}],408:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81647,7 +84834,7 @@ module.exports = quoteAttributeValueForBrowser;
 var ReactMount = require('./ReactMount');
 
 module.exports = ReactMount.renderSubtreeIntoContainer;
-},{"./ReactMount":311}],373:[function(require,module,exports){
+},{"./ReactMount":347}],409:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81738,7 +84925,7 @@ if (ExecutionEnvironment.canUseDOM) {
 }
 
 module.exports = setInnerHTML;
-},{"fbjs/lib/ExecutionEnvironment":5}],374:[function(require,module,exports){
+},{"fbjs/lib/ExecutionEnvironment":41}],410:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81779,7 +84966,7 @@ if (ExecutionEnvironment.canUseDOM) {
 }
 
 module.exports = setTextContent;
-},{"./escapeTextContentForBrowser":356,"./setInnerHTML":373,"fbjs/lib/ExecutionEnvironment":5}],375:[function(require,module,exports){
+},{"./escapeTextContentForBrowser":392,"./setInnerHTML":409,"fbjs/lib/ExecutionEnvironment":41}],411:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81804,7 +84991,7 @@ function shallowCompare(instance, nextProps, nextState) {
 }
 
 module.exports = shallowCompare;
-},{"fbjs/lib/shallowEqual":28}],376:[function(require,module,exports){
+},{"fbjs/lib/shallowEqual":64}],412:[function(require,module,exports){
 /**
  * Copyright 2013-2015, Facebook, Inc.
  * All rights reserved.
@@ -81848,7 +85035,7 @@ function shouldUpdateReactComponent(prevElement, nextElement) {
 }
 
 module.exports = shouldUpdateReactComponent;
-},{}],377:[function(require,module,exports){
+},{}],413:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -82040,7 +85227,7 @@ function traverseAllChildren(children, callback, traverseContext) {
 
 module.exports = traverseAllChildren;
 }).call(this,require('_process'))
-},{"./ReactCurrentOwner":279,"./ReactElement":297,"./ReactInstanceHandles":307,"./getIteratorFn":364,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/warning":30}],378:[function(require,module,exports){
+},{"./ReactCurrentOwner":315,"./ReactElement":333,"./ReactInstanceHandles":343,"./getIteratorFn":400,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/warning":66}],414:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2013-2015, Facebook, Inc.
@@ -82150,7 +85337,7 @@ function update(value, spec) {
 
 module.exports = update;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"_process":232,"fbjs/lib/invariant":19,"fbjs/lib/keyOf":23}],379:[function(require,module,exports){
+},{"./Object.assign":300,"_process":268,"fbjs/lib/invariant":55,"fbjs/lib/keyOf":59}],415:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2015, Facebook, Inc.
@@ -82516,12 +85703,12 @@ if (process.env.NODE_ENV !== 'production') {
 
 module.exports = validateDOMNesting;
 }).call(this,require('_process'))
-},{"./Object.assign":264,"_process":232,"fbjs/lib/emptyFunction":11,"fbjs/lib/warning":30}],380:[function(require,module,exports){
+},{"./Object.assign":300,"_process":268,"fbjs/lib/emptyFunction":47,"fbjs/lib/warning":66}],416:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./lib/React');
 
-},{"./lib/React":266}],381:[function(require,module,exports){
+},{"./lib/React":302}],417:[function(require,module,exports){
 (function (process){
 /**
  * Copyright 2014-2015, Facebook, Inc.
@@ -82585,7 +85772,7 @@ if (process.env.NODE_ENV !== 'production') {
 module.exports = warning;
 
 }).call(this,require('_process'))
-},{"_process":232}],382:[function(require,module,exports){
+},{"_process":268}],418:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -82594,7 +85781,7 @@ Object.defineProperty(exports, "__esModule", {
 function Alarm() {}
 exports.default = Alarm;
 
-},{}],383:[function(require,module,exports){
+},{}],419:[function(require,module,exports){
 "use strict";
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -82622,6 +85809,10 @@ var _Constants2 = _interopRequireDefault(_Constants);
 var _Alarms = require('./Alarms.js');
 
 var _Alarms2 = _interopRequireDefault(_Alarms);
+
+var _Notifications = require('./Notifications.js');
+
+var _Notifications2 = _interopRequireDefault(_Notifications);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -82683,13 +85874,15 @@ _Util2.default.storage.get('havetodo', function (data) {
 	}
 	if (_Util2.default.countTasks(localData.boards) !== 0) {
 		// Alarms.set();
-	} else {
-			// Alarms.clear();
-		}
+	} else {}
+		// Alarms.clear();
+
+		// console.log(Notifications);
+		// Notifications.create();
 	_reactDom2.default.render(_react2.default.createElement(App, { items: localData }), mountNode);
 });
 
-},{"./Alarms.js":382,"./Board.jsx":384,"./Constants.js":385,"./Util.js":390,"react":380,"react-dom":238,"react-tap-event-plugin":242}],384:[function(require,module,exports){
+},{"./Alarms.js":418,"./Board.jsx":420,"./Constants.js":421,"./Notifications.js":425,"./Util.js":428,"react":416,"react-dom":274,"react-tap-event-plugin":278}],420:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -82792,6 +85985,20 @@ var Board = (function (_React$Component) {
 					i--;
 				}
 			}
+			var doneList = currentBoard.lists.filter(function (list) {
+				return list.name === 'Done';
+			})[0];
+			for (var i = 0; i < doneList.cards.length; i++) {
+				var deadline = doneList.cards[i].deadline;
+				var today = (0, _moment2.default)().startOf('day');
+				if (deadline) {
+					var diff = today.diff(deadline, 'days');
+					if (diff >= 7) {
+						doneList.cards.splice(i, 1);
+						i--;
+					}
+				}
+			}
 			_this.state = {
 				board: currentBoard,
 				isBoardModalOpen: false
@@ -82836,7 +86043,6 @@ var Board = (function (_React$Component) {
 					'board': board,
 					'isBoardModalOpen': false
 				}, this.saveToStorage);
-				// this.refs.boardInput.clearValue();
 				$(_reactDom2.default.findDOMNode(this.refs.boardInput)).find('input').val('').attr('placeholder', 'Enter new board here');
 			}
 		}
@@ -82896,6 +86102,7 @@ var Board = (function (_React$Component) {
 			}
 			for (i = 0; i < lists.length; i++) {
 				if (lists[i].id === toList) {
+					card.listName = lists[i].name;
 					lists[i].cards.splice(cardLocation, 0, card);
 				}
 			}
@@ -83060,7 +86267,7 @@ var Board = (function (_React$Component) {
 
 exports.default = Board;
 
-},{"./Constants.js":385,"./InputComponent.jsx":386,"./List.jsx":387,"./ListActions.jsx":388,"./Util.js":390,"material-ui/lib/DropDownMenu":67,"material-ui/lib/dialog":99,"material-ui/lib/flat-button":106,"material-ui/lib/menus/menu-item":126,"material-ui/lib/text-field":191,"moment":231,"react":380,"react-addons-css-transition-group":234,"react-dom":238}],385:[function(require,module,exports){
+},{"./Constants.js":421,"./InputComponent.jsx":422,"./List.jsx":423,"./ListActions.jsx":424,"./Util.js":428,"material-ui/lib/DropDownMenu":103,"material-ui/lib/dialog":135,"material-ui/lib/flat-button":142,"material-ui/lib/menus/menu-item":162,"material-ui/lib/text-field":227,"moment":267,"react":416,"react-addons-css-transition-group":270,"react-dom":274}],421:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -83074,6 +86281,7 @@ var _Util2 = _interopRequireDefault(_Util);
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 var Constants = {
+	"alarmName": "havetodoalarms",
 	"colors": ["#FFFFFF", // white
 	"#E6E73B", // yellow
 	"#F29507", // orange
@@ -83102,7 +86310,7 @@ var Constants = {
 
 exports.default = Constants;
 
-},{"./Util.js":390}],386:[function(require,module,exports){
+},{"./Util.js":428}],422:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -83119,10 +86327,6 @@ var _reactDom = require('react-dom');
 
 var _reactDom2 = _interopRequireDefault(_reactDom);
 
-var _moment = require('moment');
-
-var _moment2 = _interopRequireDefault(_moment);
-
 var _card = require('material-ui/lib/card/card');
 
 var _card2 = _interopRequireDefault(_card);
@@ -83138,6 +86342,10 @@ var _textField2 = _interopRequireDefault(_textField);
 var _Mousetrap = require('Mousetrap');
 
 var _Mousetrap2 = _interopRequireDefault(_Mousetrap);
+
+var _TimeParser = require('./TimeParser.js');
+
+var _TimeParser2 = _interopRequireDefault(_TimeParser);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -83158,7 +86366,8 @@ var InputComponent = (function (_React$Component) {
 		_this.state = {
 			'card': {
 				'name': '',
-				'deadline': ''
+				'deadline': '',
+				'listName': ''
 			}
 		};
 		return _this;
@@ -83177,9 +86386,10 @@ var InputComponent = (function (_React$Component) {
 		value: function createCard(e) {
 			var name = $(e.target).val();
 			if (name.trim() != '') {
-				this.props.addCard(name, {
-					name: name,
-					deadline: ''
+				var event = (0, _TimeParser2.default)(name.trim());
+				this.props.addCard(event.name, {
+					name: event.name,
+					deadline: event.deadline
 				});
 				var input = _reactDom2.default.findDOMNode(this.refs.taskInput);
 				$(input).find('input').val('').attr('placeholder', 'Enter new task');
@@ -83220,7 +86430,7 @@ var InputComponent = (function (_React$Component) {
 
 exports.default = InputComponent;
 
-},{"Mousetrap":1,"material-ui/lib/card/card":85,"material-ui/lib/card/card-header":81,"material-ui/lib/text-field":191,"moment":231,"react":380,"react-dom":238}],387:[function(require,module,exports){
+},{"./TimeParser.js":427,"Mousetrap":1,"material-ui/lib/card/card":121,"material-ui/lib/card/card-header":117,"material-ui/lib/text-field":227,"react":416,"react-dom":274}],423:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -83314,6 +86524,7 @@ var List = (function (_React$Component) {
 					name: cardLabel
 				};
 			}
+			card['listName'] = list.name;
 			card['id'] = _Util2.default.UUID();
 			list.cards = [card].concat(list.cards);
 
@@ -83356,6 +86567,7 @@ var List = (function (_React$Component) {
 			if (this.state.list.cards.length != 0) {
 				var listIems = this.state.list.cards.map((function (card, i) {
 					return _react2.default.createElement(_TaskCard2.default, { card: card,
+						listName: this.state.list.name,
 						isTodayCard: isTodayCard,
 						update: this.onUpdate.bind(this),
 						'delete': this.onDelete.bind(this),
@@ -83393,7 +86605,7 @@ var List = (function (_React$Component) {
 
 exports.default = List;
 
-},{"./InputComponent.jsx":386,"./TaskCard.jsx":389,"./Util.js":390,"jquery":46,"jquery-ui/sortable":44,"moment":231,"react":380,"react-dom":238}],388:[function(require,module,exports){
+},{"./InputComponent.jsx":422,"./TaskCard.jsx":426,"./Util.js":428,"jquery":82,"jquery-ui/sortable":80,"moment":267,"react":416,"react-dom":274}],424:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -83463,7 +86675,39 @@ var ListActions = (function (_React$Component) {
 
 exports.default = ListActions;
 
-},{"material-ui/lib/":113,"react":380,"react-dom":238}],389:[function(require,module,exports){
+},{"material-ui/lib/":149,"react":416,"react-dom":274}],425:[function(require,module,exports){
+/*
+chrome.notifications.onButtonClicked.addListener(function(notifId, btnIdx) {
+    if (notifId === myNotificationID) {
+        if (btnIdx === 0) {
+            window.open("...");
+        } else if (btnIdx === 1) {
+            saySorry();
+        }
+    }
+});
+var Notifications = {
+	'create': function(){
+		var opt = {
+		  type: "list",
+		  title: "HaveToDo - Unfinished tasks",
+		  message: "You have unfinished tasks",
+		  iconUrl: "icons/128x128.png",
+		  items: [{ title: "2 remainaing in- ", message: "Home"},
+		          { title: "Home", message: "3"},
+		          { title: "Work", message: "4"}],
+		  buttons: [{
+        	title: "Okay"
+      	  }]
+		}
+		chrome.notifications.create('1', opt, function(){});
+	}
+};
+export default Notifications;
+*/
+"use strict";
+
+},{}],426:[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -83626,7 +86870,9 @@ var TaskCard = (function (_React$Component) {
 		key: 'showDatepicker',
 		value: function showDatepicker() {
 			if (this.props.card.deadline) this.refs.datepicker.setDate(new Date(this.props.card.deadline));
-			this.refs.datepicker.openDialog();
+			setTimeout((function () {
+				this.refs.datepicker.openDialog();
+			}).bind(this), 0);
 		}
 	}, {
 		key: 'handleDeleteDialogClose',
@@ -83651,6 +86897,7 @@ var TaskCard = (function (_React$Component) {
 			    style = {
 				borderLeft: "#FFFFFF"
 			};
+			if (this.props.card.listName === "Done") {}
 			if (this.props.isTodayCard && diff > 0) {
 				var shadePer = diff > 4 ? 4 : diff;
 				var shadedColor = _Constants2.default.colors[shadePer];
@@ -83673,11 +86920,11 @@ var TaskCard = (function (_React$Component) {
 
 			return _react2.default.createElement(
 				'li',
-				{ className: 'card-container', draggable: 'true', 'data-card-id': card.id, ref: 'listEl' },
+				{ className: "card-container " + this.props.card.listName, draggable: 'true', 'data-card-id': card.id, ref: 'listEl' },
 				_react2.default.createElement(
 					_card2.default,
 					{ expandable: false, style: style, tabIndex: _Util2.default.getTabIndex() },
-					_react2.default.createElement(_cardHeader2.default, { title: card.name, ref: 'cardName', style: { "width": "240px", "float": "left" } }),
+					_react2.default.createElement(_cardHeader2.default, { title: card.name, ref: 'cardName', style: { "width": "240px", "float": "left" }, className: 'card-container-text' }),
 					_react2.default.createElement(_textField2.default, { hintText: 'Enter task here',
 						multiLine: false,
 						ref: 'taskInput',
@@ -83736,7 +86983,39 @@ var TaskCard = (function (_React$Component) {
 
 exports.default = TaskCard;
 
-},{"./Constants.js":385,"./Util.js":390,"material-ui/lib/card/card":85,"material-ui/lib/card/card-header":81,"material-ui/lib/card/card-text":83,"material-ui/lib/date-picker/date-picker":96,"material-ui/lib/date-picker/date-picker-dialog":94,"material-ui/lib/dialog":99,"material-ui/lib/divider":100,"material-ui/lib/flat-button":106,"material-ui/lib/font-icon":108,"material-ui/lib/icon-button":112,"material-ui/lib/menus/icon-menu":125,"material-ui/lib/menus/menu-item":126,"material-ui/lib/svg-icons/navigation/more-vert":176,"material-ui/lib/text-field":191,"moment":231,"react":380,"react-dom":238}],390:[function(require,module,exports){
+},{"./Constants.js":421,"./Util.js":428,"material-ui/lib/card/card":121,"material-ui/lib/card/card-header":117,"material-ui/lib/card/card-text":119,"material-ui/lib/date-picker/date-picker":132,"material-ui/lib/date-picker/date-picker-dialog":130,"material-ui/lib/dialog":135,"material-ui/lib/divider":136,"material-ui/lib/flat-button":142,"material-ui/lib/font-icon":144,"material-ui/lib/icon-button":148,"material-ui/lib/menus/icon-menu":161,"material-ui/lib/menus/menu-item":162,"material-ui/lib/svg-icons/navigation/more-vert":212,"material-ui/lib/text-field":227,"moment":267,"react":416,"react-dom":274}],427:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+	value: true
+});
+
+var _chronoNode = require('chrono-node');
+
+var _chronoNode2 = _interopRequireDefault(_chronoNode);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function TimeParser(input) {
+	var parsedText = _chronoNode2.default.parse(input)[0];
+	if (!parsedText) {
+		return {
+			'name': input,
+			'deadline': ''
+		};
+	}
+	var timeText = parsedText.text;
+	var parsedTime = _chronoNode2.default.parseDate(input);
+	var name = input.replace(timeText, '').trim();
+	return {
+		'name': name,
+		'deadline': new Date(parsedTime)
+	};
+}
+
+exports.default = TimeParser;
+
+},{"chrono-node":3}],428:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -83818,7 +87097,7 @@ Util.countTasks = function (boards) {
 
 exports.default = Util;
 
-},{"moment":231}],391:[function(require,module,exports){
+},{"moment":267}],429:[function(require,module,exports){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", {
@@ -83900,4 +87179,4 @@ Util.countTasks = function (boards) {
 
 exports.default = Util;
 
-},{"moment":231}]},{},[383,384,386,387,388,389,391,385]);
+},{"moment":267}]},{},[419,420,422,423,424,426,429,421]);

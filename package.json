@@ -1,6 +1,6 @@
 {
   "name": "havetodo",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Chrome extension for todo lists on new page",
   "main": "script.js",
   "scripts": {
@@ -27,6 +27,8 @@
     "babel-preset-react": "^6.3.13",
     "babelify": "^7.2.0",
     "browserify": "^12.0.1",
+    "chrono-node": "^1.2.1",
+    "fullcalendar": "^2.5.0",
     "grunt": "^0.4.5",
     "grunt-bell": "^0.1.2",
     "grunt-browserify": "^4.0.1",
@@ -42,6 +44,7 @@
     "grunt-react": "^0.12.3",
     "jquery": "^2.1.4",
     "jquery-ui": "^1.10.5",
+    "later": "^1.2.0",
     "material-ui": "^0.14.0",
     "moment": "^2.10.6",
     "mousetrap": "^1.5.3",

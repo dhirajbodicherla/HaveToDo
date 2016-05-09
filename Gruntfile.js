@@ -8,7 +8,7 @@ module.exports = function(grunt) {
     watch: {
       browserify: {
         files: ['scripts/*.jsx', 'scripts/*.js', 'tpl/*.html'],
-        tasks: ['browserify:dev', 'concat:dev', 'copy:dev', 'bell'],
+        tasks: ['browserify:dev', 'concat:dev', 'copy:dev', 'ext', 'bell'],
         options: {
           livereload: true
         }
@@ -78,7 +78,8 @@ module.exports = function(grunt) {
                 { src: 'bower_components/Materialize/dist/css/materialize.min.css', dest: 'extension/materialize.min.css'},
                 { src: 'bower_components/Materialize/dist/js/materialize.min.js', dest: 'extension/materialize.min.js'},
                 { src: 'bower_components/jquery/dist/jquery.min.js', dest: 'extension/jquery.min.js'},
-                { src: 'options.js', dest: 'extension/options.js'}]
+                { src: 'options.js', dest: 'extension/options.js'},
+                { src: 'background.js', dest: 'extension/background.js'}]
       },
       prod: {
         files: [{ src: 'app.min.js', dest: 'extension/app.min.js' },
@@ -89,7 +90,8 @@ module.exports = function(grunt) {
                 { src: 'bower_components/Materialize/dist/css/materialize.min.css', dest: 'extension/materialize.min.css'},
                 { src: 'bower_components/Materialize/dist/js/materialize.min.js', dest: 'extension/materialize.min.js'},
                 { src: 'bower_components/jquery/dist/jquery.min.js', dest: 'extension/jquery.min.js'},
-                { src: 'options.js', dest: 'extension/options.js'}]
+                { src: 'options.js', dest: 'extension/options.js'},
+                { src: 'background.js', dest: 'extension/background.js'}]
       }
     },
 

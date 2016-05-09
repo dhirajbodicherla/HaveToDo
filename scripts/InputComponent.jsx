@@ -1,10 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import moment from 'moment';
 import Card from 'material-ui/lib/card/card';
 import CardHeader from 'material-ui/lib/card/card-header';
 import TextField from 'material-ui/lib/text-field';
 import Mousetrap from 'Mousetrap';
+import TimeParser from './TimeParser.js'
 
 export default class InputComponent extends React.Component{
 	constructor(props){
@@ -12,7 +12,8 @@ export default class InputComponent extends React.Component{
 		this.state = {
 			'card': {
 				'name': '',
-				'deadline': ''
+				'deadline': '',
+				'listName': ''
 			}
 		};
 	}
@@ -25,9 +26,10 @@ export default class InputComponent extends React.Component{
 	createCard(e){
 		var name = $(e.target).val();
 		if(name.trim() != ''){
-			this.props.addCard(name, {
-				name: name,
-				deadline: ''
+			var event = TimeParser(name.trim());
+			this.props.addCard(event.name, {
+				name: event.name,
+				deadline: event.deadline
 			});
 			var input = ReactDOM.findDOMNode(this.refs.taskInput); 
 			$(input).find('input').val('').attr('placeholder', 'Enter new task');

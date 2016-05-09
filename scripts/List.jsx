@@ -43,9 +43,10 @@ export default class List extends React.Component{
 				name: cardLabel
 			};
 		}
+		card['listName'] = list.name;
 		card['id'] = Util.UUID();
 		list.cards = [card].concat(list.cards);
-
+		
 		this.setState({
 			'list': list
 		}, this.onUpdate.bind(this));
@@ -74,7 +75,8 @@ export default class List extends React.Component{
 		
 		if(this.state.list.cards.length != 0){
 			var listIems = this.state.list.cards.map(function(card, i){
-				return <TaskCard card={card} 
+				return <TaskCard card={card}
+								listName={this.state.list.name} 
 								isTodayCard={isTodayCard} 
 								update={this.onUpdate.bind(this)}
 								delete={this.onDelete.bind(this)}

@@ -66,7 +66,9 @@ export default class TaskCard extends React.Component{
 	showDatepicker() {
 		if(this.props.card.deadline)
 			this.refs.datepicker.setDate(new Date(this.props.card.deadline));
-		this.refs.datepicker.openDialog();
+		setTimeout(function(){
+			this.refs.datepicker.openDialog();
+		}.bind(this), 0);
 	}
 	handleDeleteDialogClose(){
 		var state = this.state;
@@ -85,6 +87,9 @@ export default class TaskCard extends React.Component{
 			style = {
 				borderLeft: "#FFFFFF"
 			};
+		if(this.props.card.listName === "Done"){
+
+		}
 		if(this.props.isTodayCard && diff > 0){
 			var shadePer = (diff > 4 ) ? 4 : diff;
 			var shadedColor = Constants.colors[shadePer];
@@ -104,9 +109,9 @@ export default class TaskCard extends React.Component{
 	        onTouchTap={this.deleteCard.bind(this)} />,
 	    ];
 
-	  	return <li className="card-container" draggable="true" data-card-id={card.id} ref="listEl">
+	  	return <li className={"card-container " + this.props.card.listName} draggable="true" data-card-id={card.id} ref="listEl">
 		  	<Card expandable={false} style={style} tabIndex={Util.getTabIndex()}>
-		  		<CardHeader title={card.name} ref="cardName" style={{"width": "240px", "float": "left"}}/>
+		  		<CardHeader title={card.name} ref="cardName" style={{"width": "240px", "float": "left"}} className="card-container-text"/>
 		  	    	<TextField hintText="Enter task here" 
 		  	    				multiLine={false} 
 		  	    				ref="taskInput" 

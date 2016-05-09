@@ -33,6 +33,18 @@ export default class Board extends React.Component{
 	      		i--;
 	      	}
 	      }
+	      var doneList = currentBoard.lists.filter(function(list){ return list.name === 'Done'; })[0];
+	      for(var i=0;i<doneList.cards.length;i++){
+	      	var deadline = doneList.cards[i].deadline;
+	      	var today = moment().startOf('day');
+	      	if(deadline){
+	      		var diff = today.diff(deadline, 'days');
+	      		if(diff >= 7){
+	      			doneList.cards.splice(i,1);
+	      			i--;
+	      		}
+	      	}
+	      }
 	      this.state = {
 	      	board: currentBoard,
 	      	isBoardModalOpen: false
@@ -98,7 +110,7 @@ export default class Board extends React.Component{
     	}, this.saveToStorage);
     }
     moveCard(fromList, toList, cardID, cardLocation){
-    	var lists = this.state.board.lists, tList, card;     
+    	var lists = this.state.board.lists, tList, card;  
 		for(var i=0;i<lists.length;i++){
 			if(lists[i].id === fromList){
 				lists[i].cards = lists[i].cards.filter(function(v){
@@ -114,6 +126,7 @@ export default class Board extends React.Component{
     	}
     	for(i=0;i<lists.length;i++){
     		if(lists[i].id === toList){
+    			card.listName = lists[i].name;
     			lists[i].cards.splice(cardLocation, 0, card);
     		}
     	}

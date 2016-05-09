@@ -1,6 +1,7 @@
 import Util from './Util.js';
 
 var Constants = {
+	"alarmName": "havetodoalarms",
 	"colors": [
 		"#FFFFFF", // white
 		"#E6E73B", // yellow

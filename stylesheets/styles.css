@@ -141,6 +141,9 @@ ul{
 .card-container.input-container .deadline-container{
   display: none;
 }
+.card-container.Done .card-container-text > div {
+  text-decoration: line-through;
+}
 .task-input{
   outline: none;
   background: none;
