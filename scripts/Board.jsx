@@ -94,6 +94,8 @@ export default class Board extends React.Component{
 			this.setState(state, function(){
 				$(ReactDOM.findDOMNode(this.refs.boardInput)).find('input').focus();
 			}.bind(this));
+		}else if(value == -2){
+			console.log('have to show board manager');
 		}else{
 			var newValue = value;
 	      	var board = this.props.items.boards.filter(function(v){ return v.id == newValue; })[0];
@@ -177,6 +179,32 @@ export default class Board extends React.Component{
 		var list = board.lists.filter(function(list){ return list.id === listID})[0];
 	}
     render() {
+
+    	if(this.state.isBoardModalOpen){
+    		var isCancelDisabled = (this.props.items.boards.length) ? false: true;
+    		var actions = [
+				<FlatButton
+					label="Cancel"
+					disabled={isCancelDisabled}
+					primary={true} 
+					onTouchTap={this.boardModalButtonClick.bind(this)} />,
+				<FlatButton
+					label="Submit"
+					secondary={true}
+					onTouchTap={this.createBoard.bind(this)} />,
+		    ];
+			return <Dialog
+		          title="Create new board"
+		          actions={actions}
+		          modal={true}
+		          open={this.state.isBoardModalOpen}>
+		          	<TextField fullWidth={true} 
+		          				hintText="Enter new board here" 
+		          				ref="boardInput"
+		          				onEnterKeyDown={this.createBoard.bind(this)}/>
+		        </Dialog>;
+    	}
+
 	    var boards = [];
 	    if(this.props.items.boards.length){
 	    	var actions = [
@@ -205,6 +233,7 @@ export default class Board extends React.Component{
 			boards = this.props.items.boards.map(function(board){
 				return <MenuItem value={board.id} primaryText={board.name} key={board.id}/>
 			});
+			boards.push(<MenuItem value="-2" primaryText="Manage boards" key="-2"></MenuItem>);
 			boards.push(<MenuItem value="-1" primaryText="Create new board" key="-1"></MenuItem>);
 
 			return (<div>
@@ -220,36 +249,7 @@ export default class Board extends React.Component{
 				<div id="board-container">
 					<ReactCSSTransitionGroup key={board.id} transitionEnterTimeout={500} transitionLeaveTimeout={300} component="ul" transitionName="tasks-list-transition" className="lists-container">{boardLists}</ReactCSSTransitionGroup>
 				</div>
-				<Dialog
-		          title="Create new board"
-		          actions={actions}
-		          modal={false}
-		          open={this.state.isBoardModalOpen}>
-		          	<TextField fullWidth={true} hintText="Enter new board here" ref="boardInput" onEnterKeyDown={this.createBoard.bind(this)}/>
-		        </Dialog>
 			</div>);
-		}else{
-	    	var actions = [
-				<FlatButton
-					label="Cancel"
-					disabled={true}
-					primary={true} 
-					onTouchTap={this.boardModalButtonClick.bind(this)} />,
-				<FlatButton
-					label="Submit"
-					secondary={true}
-					onTouchTap={this.createBoard.bind(this)} />,
-		    ];
-			return <Dialog
-		          title="Create new board"
-		          actions={actions}
-		          modal={true}
-		          open={this.state.isBoardModalOpen}>
-		          	<TextField fullWidth={true} 
-		          				hintText="Enter new board here" 
-		          				ref="boardInput"
-		          				onEnterKeyDown={this.createBoard.bind(this)}/>
-		        </Dialog>;
 		}
     }
 }
